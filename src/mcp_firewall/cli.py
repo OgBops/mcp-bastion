@@ -143,6 +143,53 @@ def up(
         audit.close()
 
 
+@main.command()
+@click.argument("server_name")
+@click.argument("upstream_argv", nargs=-1, required=True)
+@click.option(
+    "--policy",
+    "-p",
+    "policy_path",
+    type=click.Path(),
+    default="~/.mcp-firewall/policy.yaml",
+    show_default=True,
+    help="Path to policy.yaml that the wrapped server will use.",
+)
+def wrap(
+    server_name: str,
+    upstream_argv: tuple[str, ...],
+    policy_path: str,
+) -> None:
+    """Print a Claude Desktop / Cursor / VS Code MCP config snippet that wraps
+    an upstream MCP server with mcp-firewall.
+
+    Example:
+
+        mcp-firewall wrap filesystem -- uvx mcp-server-filesystem /tmp
+
+    Then paste the resulting snippet into your client config:
+      - Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json
+      - Cursor:        ~/.cursor/mcp.json
+      - VS Code:       .vscode/mcp.json
+    """
+    upstream_cmd = " ".join(upstream_argv)
+    snippet = {
+        "mcpServers": {
+            server_name: {
+                "command": "mcp-firewall",
+                "args": [
+                    "up",
+                    "--policy",
+                    str(Path(policy_path).expanduser()),
+                    "--upstream",
+                    upstream_cmd,
+                ],
+            }
+        }
+    }
+    click.echo(json.dumps(snippet, indent=2))
+
+
 @main.command("inspect-log")
 @click.option(
     "--policy",

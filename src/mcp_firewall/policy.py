@@ -146,10 +146,9 @@ class PolicyEngine:
         if frame.kind == FrameKind.INVALID:
             return Decision(type=DecisionType.ALLOW, reason="non-mcp frame, pass through")
 
-        # tools/list response: pin or detect drift
-        if (
-            frame.kind == FrameKind.RESPONSE
-            and self.policy.pinning_enabled
+        # tools/list response: pin / detect drift / classify
+        if frame.kind == FrameKind.RESPONSE and (
+            self.policy.pinning_enabled or self.policy.classifier_enabled
         ):
             drift = self._check_tools_list_drift(frame)
             if drift is not None:
