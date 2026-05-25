@@ -1,0 +1,22 @@
+version: 1
+
+deny_tools:
+  - "shell.*"
+  - "*.delete_*"
+
+redact_args:
+  - pattern: 'sk-[A-Za-z0-9]{20,}'
+    replacement: '[REDACTED_API_KEY]'
+  - pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+    replacement: '[REDACTED_EMAIL]'
+
+require_approval:
+  - "filesystem.write_file"
+  - "github.create_issue"
+
+tool_description_pinning:
+  enabled: true
+  on_drift: alert
+
+audit:
+  path: ~/.mcp-firewall/audit.sqlite
