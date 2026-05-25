@@ -29,6 +29,7 @@ from .jsonrpc import (
     parse_frame,
     serialize_frame,
 )
+from . import nitro_enclave
 from .policy import PolicyEngine
 from .types import Decision, DecisionType, Direction
 
@@ -59,12 +60,25 @@ class HttpProxy:
 
     def app(self) -> web.Application:
         app = web.Application()
+        # Operational endpoints (must be registered before the catch-all).
+        app.router.add_route("GET", "/attestation", self._handle_attestation)
+        app.router.add_route("GET", "/healthz", self._handle_healthz)
         app.router.add_route("POST", "/{tail:.*}", self._handle_post)
         app.router.add_route("GET", "/{tail:.*}", self._handle_get)
         app.router.add_route("DELETE", "/{tail:.*}", self._handle_delete)
         app.on_startup.append(self._on_startup)
         app.on_cleanup.append(self._on_cleanup)
         return app
+
+    async def _handle_attestation(self, request: web.Request) -> web.Response:
+        """Return a Nitro attestation document or a clear 'not attested' fallback."""
+        nonce_param = request.query.get("nonce")
+        nonce = nonce_param.encode("utf-8") if nonce_param else None
+        report = nitro_enclave.get_attestation(nonce=nonce)
+        return web.json_response(nitro_enclave.attestation_to_json(report))
+
+    async def _handle_healthz(self, _: web.Request) -> web.Response:
+        return web.json_response({"status": "ok"})
 
     async def _on_startup(self, _: web.Application) -> None:
         self._session = aiohttp.ClientSession()

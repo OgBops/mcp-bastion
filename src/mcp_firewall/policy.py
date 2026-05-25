@@ -40,6 +40,10 @@ class Policy:
     pinning_enabled: bool = False
     pinning_on_drift: str = "alert"  # "alert" or "block"
     audit_path: Path = field(default_factory=lambda: Path("~/.mcp-firewall/audit.sqlite"))
+    classifier_enabled: bool = False
+    classifier_threshold: float = 0.85
+    classifier_on_match: str = "alert"  # "alert" or "block"
+    classifier_model: str = "protectai/deberta-v3-base-prompt-injection-v2"
 
     @classmethod
     def from_yaml(cls, path: Path) -> Policy:
@@ -74,6 +78,16 @@ class Policy:
         audit_cfg = data.get("audit") or {}
         audit_path = Path(audit_cfg.get("path", "~/.mcp-firewall/audit.sqlite")).expanduser()
 
+        cls_cfg = data.get("classifier") or {}
+        classifier_enabled = bool(cls_cfg.get("enabled", False))
+        classifier_threshold = float(cls_cfg.get("threshold", 0.85))
+        classifier_on_match = str(cls_cfg.get("on_match", "alert")).lower()
+        if classifier_on_match not in {"alert", "block"}:
+            classifier_on_match = "alert"
+        classifier_model = str(
+            cls_cfg.get("model", "protectai/deberta-v3-base-prompt-injection-v2")
+        )
+
         return cls(
             deny_tools=deny_tools,
             redact_rules=redact_rules,
@@ -81,6 +95,10 @@ class Policy:
             pinning_enabled=pinning_enabled,
             pinning_on_drift=pinning_on_drift,
             audit_path=audit_path,
+            classifier_enabled=classifier_enabled,
+            classifier_threshold=classifier_threshold,
+            classifier_on_match=classifier_on_match,
+            classifier_model=classifier_model,
         )
 
 
@@ -101,6 +119,11 @@ class PolicyEngine:
         # plus persists in SQLite via record_pin().
         self._pins: dict[str, str] = {}  # tool_name -> sha256(description)
         self._pin_db: sqlite3.Connection | None = None
+        self._classifier = None
+        if policy.classifier_enabled:
+            from . import classifier as _cls
+
+            self._classifier = _cls.get_classifier(policy.classifier_model)
 
     def attach_pin_store(self, db: sqlite3.Connection) -> None:
         """Persist tool description pins to SQLite for cross-restart durability."""
@@ -177,7 +200,7 @@ class PolicyEngine:
         return Decision(type=DecisionType.ALLOW, reason="no rule matched")
 
     def _check_tools_list_drift(self, frame: MCPFrame) -> Decision | None:
-        """Look for tools/list responses; pin or detect drift."""
+        """Look for tools/list responses; pin/detect drift, classify descriptions."""
         result = frame.payload.get("result")
         if not isinstance(result, dict):
             return None
@@ -187,6 +210,7 @@ class PolicyEngine:
 
         drifted: list[str] = []
         notes: list[str] = []
+        suspicious: list[str] = []
         for t in tools:
             if not isinstance(t, dict):
                 continue
@@ -194,6 +218,12 @@ class PolicyEngine:
             description = t.get("description", "") or ""
             if not isinstance(name, str):
                 continue
+
+            if self._classifier is not None:
+                score = self._classifier.score(description)
+                if score is not None and score >= self.policy.classifier_threshold:
+                    suspicious.append(f"{name}={score:.2f}")
+
             digest = hashlib.sha256(description.encode("utf-8")).hexdigest()
             prior = self._pins.get(name)
             if prior is None:
@@ -203,10 +233,25 @@ class PolicyEngine:
             elif prior != digest:
                 drifted.append(name)
 
+        # Classifier match takes priority — it's a stronger signal than drift.
+        if suspicious:
+            reason = (
+                f"prompt-injection classifier flagged tool description(s): "
+                f"{', '.join(suspicious)} (threshold={self.policy.classifier_threshold})"
+            )
+            if self.policy.classifier_on_match == "block":
+                return Decision(
+                    type=DecisionType.DENY,
+                    reason=reason,
+                    matched_rule="prompt_injection_classifier",
+                    notes=suspicious,
+                )
+            # alert mode falls through to drift handling but we surface the note.
+            notes.append(f"CLASSIFIER ALERT: {', '.join(suspicious)}")
+
         if not drifted:
             return Decision(type=DecisionType.ALLOW, reason="; ".join(notes) or "tools list ok")
 
-        # Drift detected
         if self.policy.pinning_on_drift == "block":
             return Decision(
                 type=DecisionType.DENY,
@@ -216,7 +261,8 @@ class PolicyEngine:
             )
         return Decision(
             type=DecisionType.ALLOW,
-            reason=f"DRIFT ALERT for: {', '.join(drifted)} (allowed; alert mode)",
+            reason=f"DRIFT ALERT for: {', '.join(drifted)} (allowed; alert mode)"
+            + (f"; {'; '.join(notes)}" if notes else ""),
             matched_rule="tool_description_pinning",
             notes=drifted,
         )

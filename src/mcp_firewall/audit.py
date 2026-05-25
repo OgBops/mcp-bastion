@@ -12,6 +12,7 @@ us a clean shape for SIEM forwarders later.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import sqlite3
@@ -20,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import crypto
 from .types import Decision, MCPFrame
 
 GENESIS_PREV_HASH = "0" * 64
@@ -39,17 +41,21 @@ class AuditRow:
     payload_json: str
     prev_hash: str
     entry_hash: str
+    signature_b64: str | None = None
+    signing_algorithm: str | None = None
 
 
 class AuditLog:
-    """SQLite-backed hash-chained append-only log."""
+    """SQLite-backed hash-chained append-only log with optional PQC signatures."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, sign: bool = True) -> None:
         self.path = Path(path).expanduser()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
+        self._keypair = crypto.ensure_keypair() if sign else None
+        self._sign_enabled = sign
 
     def _init_schema(self) -> None:
         self.conn.execute(
@@ -66,10 +72,21 @@ class AuditLog:
                 matched_rule TEXT,
                 payload_json TEXT NOT NULL,
                 prev_hash TEXT NOT NULL,
-                entry_hash TEXT NOT NULL
+                entry_hash TEXT NOT NULL,
+                signature_b64 TEXT,
+                signing_algorithm TEXT
             )
             """
         )
+        # Best-effort migration: add signature columns to a pre-v0.2 schema.
+        for col, decl in (
+            ("signature_b64", "TEXT"),
+            ("signing_algorithm", "TEXT"),
+        ):
+            try:
+                self.conn.execute(f"ALTER TABLE audit ADD COLUMN {col} {decl}")
+            except sqlite3.OperationalError:
+                pass
         self.conn.commit()
 
     def append(self, frame: MCPFrame, decision: Decision) -> AuditRow:
@@ -94,13 +111,21 @@ class AuditLog:
         }
         entry_hash = _hash_body(body)
 
+        signature_b64: str | None = None
+        signing_algorithm: str | None = None
+        if self._sign_enabled and self._keypair is not None:
+            sig = crypto.sign(self._keypair.secret_key, entry_hash.encode("utf-8"))
+            signature_b64 = base64.b64encode(sig).decode("ascii")
+            signing_algorithm = crypto.SIGNING_ALGORITHM
+
         cur = self.conn.execute(
             """
             INSERT INTO audit
             (timestamp, direction, method, tool_name, rpc_id,
              decision_type, decision_reason, matched_rule,
-             payload_json, prev_hash, entry_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             payload_json, prev_hash, entry_hash,
+             signature_b64, signing_algorithm)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 body["timestamp"],
@@ -114,6 +139,8 @@ class AuditLog:
                 body["payload_json"],
                 body["prev_hash"],
                 entry_hash,
+                signature_b64,
+                signing_algorithm,
             ),
         )
         self.conn.commit()
@@ -130,6 +157,8 @@ class AuditLog:
             payload_json=body["payload_json"],
             prev_hash=body["prev_hash"],
             entry_hash=entry_hash,
+            signature_b64=signature_b64,
+            signing_algorithm=signing_algorithm,
         )
 
     def _last_hash(self) -> str:
@@ -138,8 +167,12 @@ class AuditLog:
         ).fetchone()
         return row["entry_hash"] if row else GENESIS_PREV_HASH
 
-    def verify_chain(self) -> tuple[bool, int | None, str]:
-        """Recompute every hash from the head. Returns (ok, broken_seq, message)."""
+    def verify_chain(self, verify_signatures: bool = True) -> tuple[bool, int | None, str]:
+        """Recompute every hash from the head and (optionally) verify each signature.
+
+        Returns (ok, broken_seq, message).
+        """
+        public_key = self._keypair.public_key if self._keypair else None
         prev = GENESIS_PREV_HASH
         for row in self.conn.execute("SELECT * FROM audit ORDER BY seq ASC"):
             body = {
@@ -159,6 +192,17 @@ class AuditLog:
             recomputed = _hash_body(body)
             if recomputed != row["entry_hash"]:
                 return (False, row["seq"], f"entry_hash mismatch at seq={row['seq']}")
+
+            sig_b64 = row["signature_b64"] if "signature_b64" in row.keys() else None
+            if verify_signatures and sig_b64 and public_key is not None:
+                sig = base64.b64decode(sig_b64)
+                if not crypto.verify(public_key, row["entry_hash"].encode("utf-8"), sig):
+                    return (
+                        False,
+                        row["seq"],
+                        f"PQC signature invalid at seq={row['seq']}",
+                    )
+
             prev = row["entry_hash"]
         return (True, None, "ok")
 

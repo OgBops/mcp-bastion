@@ -19,7 +19,7 @@ enterprise problem on the 2026 roadmap.
 
 This is the gateway.
 
-## What it does (v0)
+## What it does
 
 - **Proxies stdio MCP servers** — wraps `uvx mcp-server-filesystem`, `npx
   @modelcontextprotocol/server-github`, etc.
@@ -31,7 +31,14 @@ This is the gateway.
 - **Pins tool descriptions** — alerts/blocks if a tool's description changes
   after first sight (mitigates [tool poisoning
   attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks))
-- **Tamper-evident audit log** — SQLite, hash-chained, append-only
+- **Prompt-injection classifier** *(optional)* — fine-tuned DeBERTa scores
+  every tool description and flags/blocks injection attempts
+- **Post-quantum signed audit log** — every row signed with NIST [ML-DSA-44
+  (FIPS 204)](https://csrc.nist.gov/pubs/fips/204/final), SQLite-backed,
+  hash-chained, append-only
+- **Nitro Enclave attestation** — when run inside an AWS Nitro Enclave, the
+  proxy exposes `/attestation` so customers can cryptographically prove the
+  exact binary inspecting their MCP traffic
 
 ## Install
 
@@ -105,12 +112,51 @@ LLM client  ─▶  mcp-firewall  ─▶  MCP server
 See [`BUILD_PLAN.md`](BUILD_PLAN.md) for module-level detail and the v0
 acceptance criteria.
 
+## Optional features
+
+### Prompt-injection classifier
+
+```bash
+pip install 'mcp-firewall[classifier]'  # adds transformers + torch (~2GB)
+```
+
+Then in policy.yaml:
+
+```yaml
+classifier:
+  enabled: true
+  threshold: 0.85
+  on_match: block      # alert | block
+  model: protectai/deberta-v3-base-prompt-injection-v2
+```
+
+The classifier lazy-loads on first use (~5s startup, ~50-100ms inference per
+tool description). Recommended for high-trust environments where any
+injection signal should block.
+
+### Nitro Enclave attestation
+
+```bash
+docker build -t mcp-firewall:0.2.0 .
+nitro-cli build-enclave --docker-uri mcp-firewall:0.2.0 --output-file mcp-firewall.eif
+nitro-cli run-enclave --cpu-count 2 --memory 2048 --eif-path mcp-firewall.eif --enclave-cid 16
+```
+
+Customers verify the running binary with:
+
+```bash
+curl https://your-proxy/attestation?nonce=<random>
+```
+
+Outside an enclave, `/attestation` returns a structured "not in enclave"
+response so the same code paths work everywhere.
+
 ## What it does NOT do (yet)
 
-- Prompt-injection ML classifier (regex + drift detection only)
 - Confused-deputy protection across multiple OAuth-authorized MCP servers
 - SIEM forwarding (audit log is local SQLite)
 - Multi-tenant SaaS (that's the commercial control plane, separate repo)
+- Differential-privacy aggregation of threat intel across customers
 
 These are roadmap items; PRs welcome.
 
