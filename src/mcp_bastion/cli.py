@@ -17,7 +17,7 @@ from .stdio_proxy import StdioProxy
 
 STARTER_POLICY = """\
 # mcp-bastion starter policy
-# https://github.com/your-org/mcp-bastion
+# https://github.com/OgBops/mcp-bastion
 
 version: 1
 

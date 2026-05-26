@@ -49,9 +49,9 @@ dev = [
 mcp-bastion = "mcp_bastion.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/your-org/mcp-bastion"
-Repository = "https://github.com/your-org/mcp-bastion"
-Issues = "https://github.com/your-org/mcp-bastion/issues"
+Homepage = "https://github.com/OgBops/mcp-bastion"
+Repository = "https://github.com/OgBops/mcp-bastion"
+Issues = "https://github.com/OgBops/mcp-bastion/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

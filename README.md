@@ -56,48 +56,77 @@ This is the gateway.
 
 ## Install
 
+> PyPI publish is pending — install from source for now.
+
 ```bash
-# pip install mcp-bastion          # PyPI publish pending; install from source for now
-git clone https://github.com/your-org/mcp-bastion
+git clone https://github.com/OgBops/mcp-bastion.git
 cd mcp-bastion
-python3 -m venv .venv && . .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
-mcp-bastion --version              # → mcp-bastion, version 0.3.1
+mcp-bastion --version
 ```
 
-Optional extras:
+Expected output:
+
+```
+mcp-bastion, version 0.3.1
+```
+
+Optional: install the prompt-injection classifier (adds `transformers` + `torch`, ~2 GB):
 
 ```bash
-pip install -e ".[classifier]"    # adds transformers + torch (~2GB) for prompt-injection detection
+pip install -e ".[classifier]"
 ```
 
 ## 60-second demo
 
+**Step 1.** Generate a starter policy:
+
 ```bash
-# 1. Generate a starter policy
 mcp-bastion init -o policy.yaml
+```
 
-# 2. Wrap a real MCP server (stdio mode)
-mcp-bastion up \
-  --policy policy.yaml \
-  --upstream "uvx mcp-server-filesystem /tmp" \
-  --verbose
+**Step 2.** Wrap a real MCP server (stdio mode):
 
-# 3. In another shell, drive it with Anthropic's MCP Inspector
-npx @modelcontextprotocol/inspector \
-  mcp-bastion up --policy policy.yaml --upstream "uvx mcp-server-filesystem /tmp"
+```bash
+mcp-bastion up --policy policy.yaml --upstream "uvx mcp-server-filesystem /tmp" --verbose
+```
 
-# 4. Inspect the PQC-signed audit log
+**Step 3.** In another shell, drive it with Anthropic's MCP Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector mcp-bastion up --policy policy.yaml --upstream "uvx mcp-server-filesystem /tmp"
+```
+
+**Step 4.** Inspect the PQC-signed audit log:
+
+```bash
 mcp-bastion inspect-log --policy policy.yaml --verify
 ```
 
-To wire it into Claude Desktop, Cursor, or VS Code, see
-[`docs/claude-desktop-setup.md`](docs/claude-desktop-setup.md). For the
-quick wrap snippet:
+### Try the realistic attack scenario
+
+If you want to see `mcp-bastion` block a real-world attack class — a
+malicious MCP server silently mutating a tool description weeks after
+install — the repo ships a one-shot reproducer:
+
+```bash
+./examples/use-case-meridian/reproduce.sh
+```
+
+The full narrative is in [`docs/USE_CASE.md`](docs/USE_CASE.md).
+
+### Wire it into Claude Desktop, Cursor, or VS Code
+
+See [`docs/claude-desktop-setup.md`](docs/claude-desktop-setup.md). The
+short version: generate a config snippet with
 
 ```bash
 mcp-bastion wrap filesystem -- uvx mcp-server-filesystem /tmp
 ```
+
+then paste the result into your client's MCP config file.
 
 ## HTTP mode
 
