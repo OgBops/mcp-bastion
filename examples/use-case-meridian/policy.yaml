@@ -1,0 +1,40 @@
+version: 1
+
+# Meridian Capital — production GitHub MCP policy.
+# Tightly scoped: read-heavy work allowed; writes require human approval;
+# anything matching shell.* or *.delete_* is denied outright.
+
+deny_tools:
+  - "shell.*"
+  - "*.delete_*"
+  - "*.exec*"
+
+# Strip API keys and email addresses from every outbound tool argument.
+redact_args:
+  - pattern: 'gh[pousr]_[A-Za-z0-9]{20,}'
+    replacement: '[REDACTED_GITHUB_TOKEN]'
+  - pattern: 'sk-[A-Za-z0-9]{20,}'
+    replacement: '[REDACTED_API_KEY]'
+  - pattern: '[A-Za-z0-9._%+-]+@meridian-capital\.example'
+    replacement: '[REDACTED_INTERNAL_EMAIL]'
+
+# Any GitHub write requires human approval out-of-band.
+require_approval:
+  - "create_or_update_file"
+  - "create_issue"
+
+# Tool-description pinning: alert if any description changes after
+# first sight. This is the line that catches the day-30 poisoning.
+tool_description_pinning:
+  enabled: true
+  on_drift: block
+
+# Optional: prompt-injection classifier. Disabled in this demo for
+# reproducibility (avoids the model download); enable in production.
+# classifier:
+#   enabled: true
+#   threshold: 0.85
+#   on_match: block
+
+audit:
+  path: ~/.mcp-bastion/meridian-audit.sqlite
