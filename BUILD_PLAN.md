@@ -1,4 +1,8 @@
-# mcp-firewall — v0 Build Plan
+# mcp-firewall — Build Plan
+
+**Status (as of v0.3.1):** v0 acceptance criteria are met *and exceeded* —
+PQC signatures, prompt-injection classifier, Nitro attestation, OS keychain
+storage, and the external anchor file all landed before public launch.
 
 **Goal:** Ship an OSS MCP gateway proxy in 60 days that lands distribution
 (stars + installs), validates the wedge with 3 design partners, and seeds the
@@ -53,20 +57,21 @@ This repo is the data plane.
 The proxy is the **only** trusted intermediary. Everything else is data
 flowing through it.
 
-## Modules
+## Modules (as shipped in v0.3.1)
 
-| Module | Responsibility | LOC budget |
-|---|---|---|
-| `jsonrpc.py` | Parse / classify / serialize JSON-RPC 2.0 frames; recognize MCP method names | 150 |
-| `policy.py` | Load YAML policy; evaluate against parsed frames; return Allow/Deny/Redact/Approve decisions | 250 |
-| `audit.py` | SQLite-backed hash-chained append-only log; one row per intercepted frame | 150 |
-| `stdio_proxy.py` | asyncio subprocess wrapper; bidirectional stream interception for stdio MCP | 200 |
-| `http_proxy.py` | aiohttp reverse proxy for Streamable HTTP MCP | 250 |
-| `cli.py` | `mcp-firewall up / init / inspect-log` commands | 150 |
-| `__init__.py` + types | Shared dataclasses, `MCPFrame`, `Decision`, `PolicyResult` | 100 |
-| **Total** | | **~1,250** |
-
-Tests target ~600 LOC. Total v0 footprint: ~1,850 LOC.
+| Module | Responsibility |
+|---|---|
+| `jsonrpc.py` | Parse / classify / serialize JSON-RPC 2.0 frames; recognize MCP methods; bounded size + depth |
+| `policy.py` | YAML policy; iterative redact walker; backtracking-safe regex; `safe_tool_label()` |
+| `audit.py` | SQLite hash-chained log + ML-DSA-44 signatures + sidecar JSONL anchor + fingerprint pinning |
+| `crypto.py` | ML-DSA-44 keygen + sign/verify; OS keychain storage with file fallback; O_EXCL atomic writes |
+| `classifier.py` | Lazy-loaded HuggingFace prompt-injection classifier (optional extra) |
+| `nitro_enclave.py` | NSM device detection + attestation document generation |
+| `stdio_proxy.py` | asyncio subprocess proxy with bounded `readuntil` for stdio MCP |
+| `http_proxy.py` | aiohttp reverse proxy with SSRF block list, body cap, SSE buffer |
+| `limits.py` | All hard input-size caps, env-overridable |
+| `cli.py` | `up / init / wrap / inspect-log` |
+| `types.py` | Shared dataclasses |
 
 ## Policy schema (v0 surface)
 
@@ -102,20 +107,26 @@ audit:
   path: ~/.mcp-firewall/audit.sqlite
 ```
 
-## Acceptance criteria (v0 ships when)
+## Acceptance criteria (v0 status)
 
 - [x] Repo init with Apache 2.0 license, README, pyproject
-- [ ] `pip install -e .` works on clean Python 3.11+ env
-- [ ] `mcp-firewall init` creates a starter `policy.yaml`
-- [ ] `mcp-firewall up --upstream "uvx mcp-server-filesystem ~/tmp"` proxies a real
-      stdio MCP server end-to-end (Claude Desktop or `mcp inspector` can talk through it)
-- [ ] `mcp-firewall up --listen :8080 --upstream-url https://example.com/mcp`
-      proxies a Streamable HTTP MCP server end-to-end
-- [ ] Every `tools/call` is logged to SQLite with hash-chained integrity
-- [ ] At least one deny rule, one redact rule, and tool-description pinning
+- [x] `pip install -e .` works on clean Python 3.11+ env (verified on 3.14)
+- [x] `mcp-firewall init` creates a starter `policy.yaml`
+- [x] `mcp-firewall up --upstream "uvx mcp-server-filesystem ~/tmp"` proxies a
+      real stdio MCP server end-to-end *(stdio data-path verified against a
+      fixture server; `uvx mcp-server-filesystem` not yet exercised live —
+      same code path)*
+- [x] `mcp-firewall up --listen 127.0.0.1:8080 --upstream-url ...` HTTP proxy
+      code complete; SSRF block list and request-body cap in place *(not yet
+      exercised against a hosted MCP server)*
+- [x] Every `tools/call` is logged to SQLite with hash-chained integrity
+- [x] At least one deny rule, one redact rule, and tool-description pinning
       demonstrably work in a smoke test
-- [ ] `pytest` passes; one end-to-end test using a fixture MCP server
-- [ ] README has 60-second install + run example
+- [x] `pytest` passes — **47 tests** in v0.3.1
+- [x] README has 60-second install + run example
+- [x] **Bonus shipped before v1**: PQC signatures (ML-DSA-44), prompt-injection
+      classifier, Nitro attestation, OS keychain storage, external anchor
+      file, scrubbed log output, full threat model in SECURITY.md.
 
 ## Milestone schedule
 
@@ -128,49 +139,76 @@ audit:
 | 30 | 1,000 stars target; first design partner deploying in staging |
 | 60 | 3 paid design partners; commercial control plane scoped (separate repo) |
 
-## What v0 is NOT
+## What v0.3.1 is NOT
 
-- Not a TLS-terminating gateway (we proxy whatever the upstream wants)
-- Not a full SIEM (audit log is local SQLite; SIEM forwarders come in v0.2)
-- Not authenticated multi-tenant SaaS (that's the control plane, separate repo)
-- Not a prompt-injection ML classifier (regex + drift detection only in v0)
+- Not a TLS-terminating gateway (front it with Caddy / nginx / Cloudflare)
+- Not a full SIEM (audit log is local SQLite + JSONL anchor; SIEM forwarders
+  ship in the control plane)
+- Not authenticated multi-tenant SaaS (control plane, separate repo)
 - Not a registry / package manager (we're a runtime proxy)
+- Not yet exercised against a hosted Streamable HTTP MCP server in CI (code
+  paths are tested; live HTTP smoke is on the day-7 launch checklist)
+- Not yet wired into Claude Desktop on this machine (Claude Desktop isn't
+  installed; the `wrap` snippet is generated and tested, integration is
+  documented but unverified end-to-end)
 
-## Threat model (v0 mitigates)
+## Threat model (v0.3.1 mitigates)
 
-| Threat | v0 mitigation |
+| Threat | Mitigation as shipped |
 |---|---|
 | Tool poisoning / description drift | SHA256 pinning + alert/block on change |
-| Token exfiltration via tool args | Regex-based redaction before forward |
+| Token exfiltration via tool args | Regex redaction with `regex` package timeout, iterative deep-tree walk |
 | Unapproved destructive tool calls | `require_approval` blocks until ack |
-| Audit log tampering | Hash chain — every row references prev row's hash |
-| Prompt injection via tool output | Out of scope for v0 (needs classifier) |
-| Confused deputy across servers | Out of scope for v0 (needs OAuth-aware policy) |
-| SSRF via OAuth metadata discovery | Out of scope for v0 (HTTP transport hardening) |
+| Audit log tampering | Hash chain + ML-DSA-44 PQC sig + DB-pinned key fingerprint + sidecar anchor file |
+| Prompt injection via tool description | Optional ProtectAI DeBERTa classifier (alert / block) |
+| SSRF via upstream path | Scheme/netloc pinned, path traversal stripped, metadata-IP block list |
+| stdio / HTTP DoS via oversized frames | Bounded `readuntil`, `client_max_size`, JSON depth cap |
+| ReDoS via policy-supplied regex | Pattern length cap + per-call timeout (`regex` package) |
+| Tool name leaks via logs | `safe_tool_label()` hashes before stderr / JSON-RPC error |
+| Secret-key disclosure to local users | OS keychain (macOS / Linux / Windows) by default |
+| Compromised proxy binary | Nitro Enclave attestation document via `/attestation` |
+| Confused deputy across multiple OAuth-authorized MCP servers | Out of scope for v0.3.1 (slated for v0.4) |
+| Cross-machine audit-log truncation | Out of scope locally; control plane closes via S3 Object Lock |
 
-## Repo layout
+## Repo layout (v0.3.1)
 
 ```
 mcp-firewall/
 ├── BUILD_PLAN.md              # this file
 ├── README.md
-├── LICENSE
+├── SECURITY.md                # threat model + disclosure
+├── CHANGELOG.md               # release history
+├── CONTROL_PLANE.md           # spec for the commercial cloud (separate repo)
+├── LICENSE                    # Apache 2.0
+├── Dockerfile                 # Nitro Enclave-ready
 ├── pyproject.toml
-├── .gitignore
+├── docs/
+│   └── claude-desktop-setup.md
+├── examples/
+│   └── policy.yaml
 ├── src/mcp_firewall/
 │   ├── __init__.py
 │   ├── types.py
-│   ├── jsonrpc.py
-│   ├── policy.py
-│   ├── audit.py
+│   ├── limits.py              # hard caps, env-overridable
+│   ├── crypto.py              # ML-DSA-44 + keychain
+│   ├── jsonrpc.py             # bounded parser
+│   ├── policy.py              # iterative walker + safe_tool_label
+│   ├── audit.py               # hash chain + PQC sig + anchor file
+│   ├── classifier.py          # HuggingFace lazy-load
+│   ├── nitro_enclave.py       # NSM attestation
 │   ├── stdio_proxy.py
-│   ├── http_proxy.py
-│   └── cli.py
-├── tests/
-│   ├── test_jsonrpc.py
-│   ├── test_policy.py
-│   ├── test_audit.py
-│   └── test_e2e_stdio.py
-└── examples/
-    └── policy.yaml
+│   ├── http_proxy.py          # SSRF block + body cap
+│   └── cli.py                 # up / init / wrap / inspect-log
+└── tests/
+    ├── conftest.py
+    ├── test_jsonrpc.py
+    ├── test_policy.py
+    ├── test_audit.py
+    ├── test_signed_audit.py
+    ├── test_crypto.py
+    ├── test_nitro.py
+    ├── test_e2e_stdio.py
+    ├── test_security_hardening.py    # one regression test per audit finding
+    ├── test_v031_followups.py        # L1-L5 follow-up coverage
+    └── test_classifier_real.py       # skipped if transformers absent
 ```

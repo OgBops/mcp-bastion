@@ -1,22 +1,43 @@
 version: 1
 
+# Tools matching these globs are denied. The proxy returns a JSON-RPC error
+# to the client; the upstream never sees the call.
 deny_tools:
   - "shell.*"
   - "*.delete_*"
 
+# Regex substitutions applied to all string leaves of tools/call arguments
+# before forwarding upstream. Patterns are validated at policy-load time;
+# pathological patterns abort within the configured timeout instead of
+# hanging the proxy.
 redact_args:
   - pattern: 'sk-[A-Za-z0-9]{20,}'
     replacement: '[REDACTED_API_KEY]'
   - pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
     replacement: '[REDACTED_EMAIL]'
 
+# Tools that require human approval. v0.3 returns an "approval required"
+# JSON-RPC error to the client; v0.4 will add an out-of-band approval
+# channel.
 require_approval:
   - "filesystem.write_file"
   - "github.create_issue"
 
+# Pin tool descriptions on first sight; alert/block if they change.
+# Mitigates tool poisoning ("rug pull") attacks.
 tool_description_pinning:
   enabled: true
-  on_drift: alert
+  on_drift: alert  # alert | block
+
+# Optional: prompt-injection classifier. Requires `pip install mcp-firewall[classifier]`.
+# Lazy-loads the model on first use (~5s startup, ~50-100ms inference).
+# classifier:
+#   enabled: true
+#   threshold: 0.85
+#   on_match: block          # alert | block
+#   model: protectai/deberta-v3-base-prompt-injection-v2
 
 audit:
   path: ~/.mcp-firewall/audit.sqlite
+  # Sidecar anchor file is automatically written next to the SQLite DB
+  # (audit.anchor.jsonl). It is append-only and PQC-signed.
