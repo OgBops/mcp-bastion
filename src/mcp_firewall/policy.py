@@ -22,6 +22,7 @@ from typing import Any
 
 import yaml
 
+from .limits import MAX_REDACT_DEPTH, MAX_REGEX_INPUT_LEN, MAX_REGEX_PATTERN_LEN
 from .types import Decision, DecisionType, FrameKind, MCPFrame
 
 
@@ -60,14 +61,24 @@ class Policy:
         for entry in data.get("redact_args", []) or []:
             pattern = entry.get("pattern")
             replacement = entry.get("replacement", "[REDACTED]")
-            if pattern:
-                redact_rules.append(
-                    RedactRule(
-                        pattern=re.compile(pattern),
-                        replacement=replacement,
-                        raw_pattern=pattern,
-                    )
+            if not pattern:
+                continue
+            if not isinstance(pattern, str):
+                raise ValueError(
+                    f"redact_args.pattern must be a string, got {type(pattern).__name__}"
                 )
+            if len(pattern) > MAX_REGEX_PATTERN_LEN:
+                raise ValueError(
+                    f"redact_args.pattern too long ({len(pattern)} > "
+                    f"{MAX_REGEX_PATTERN_LEN}); refusing to load policy"
+                )
+            try:
+                compiled = re.compile(pattern)
+            except re.error as e:
+                raise ValueError(f"redact_args.pattern is invalid regex: {e}") from e
+            redact_rules.append(
+                RedactRule(pattern=compiled, replacement=replacement, raw_pattern=pattern)
+            )
 
         pinning_cfg = (data.get("tool_description_pinning") or {})
         pinning_enabled = bool(pinning_cfg.get("enabled", False))
@@ -279,23 +290,41 @@ class PolicyEngine:
         self._pin_db.commit()
 
 
-def _redact_in_place(node: Any, rules: list[RedactRule]) -> tuple[Any, int]:
+def _redact_in_place(
+    node: Any, rules: list[RedactRule], depth: int = 0
+) -> tuple[Any, int]:
     """Walk a JSON-ish structure; apply regex substitutions to all string leaves.
+
+    Hardening:
+      - Refuses to recurse past MAX_REDACT_DEPTH (cycle / nested-bomb defense).
+      - Truncates string inputs to MAX_REGEX_INPUT_LEN before regex application
+        to bound worst-case backtracking time.
 
     Returns (possibly-new-root, total_substitution_count).
     """
+    if depth > MAX_REDACT_DEPTH:
+        # Bail out quietly. We deliberately don't raise — a single deeply
+        # nested arg shouldn't kill the whole frame; we just stop redacting
+        # below this depth. The audit log will still capture the original.
+        return node, 0
     if isinstance(node, str):
-        new = node
+        # Truncating once per input is safe: it bounds regex runtime to
+        # O(MAX_REGEX_INPUT_LEN * |patterns|) which is constant.
+        target = node if len(node) <= MAX_REGEX_INPUT_LEN else node[:MAX_REGEX_INPUT_LEN]
+        new = target
         total = 0
         for r in rules:
             new, n = r.pattern.subn(r.replacement, new)
             total += n
+        # Re-attach the untouched suffix so we don't drop legitimate content.
+        if len(node) > MAX_REGEX_INPUT_LEN:
+            new = new + node[MAX_REGEX_INPUT_LEN:]
         return new, total
     if isinstance(node, list):
         out: list[Any] = []
         total = 0
         for item in node:
-            new_item, n = _redact_in_place(item, rules)
+            new_item, n = _redact_in_place(item, rules, depth + 1)
             out.append(new_item)
             total += n
         return out, total
@@ -303,7 +332,7 @@ def _redact_in_place(node: Any, rules: list[RedactRule]) -> tuple[Any, int]:
         out_d: dict[Any, Any] = {}
         total = 0
         for k, v in node.items():
-            new_v, n = _redact_in_place(v, rules)
+            new_v, n = _redact_in_place(v, rules, depth + 1)
             out_d[k] = new_v
             total += n
         return out_d, total

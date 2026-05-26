@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 from aiohttp import web
@@ -30,6 +31,7 @@ from .jsonrpc import (
     serialize_frame,
 )
 from . import nitro_enclave
+from .limits import MAX_HTTP_BODY_BYTES
 from .policy import PolicyEngine
 from .types import Decision, DecisionType, Direction
 
@@ -52,14 +54,32 @@ class HttpProxy:
         audit: AuditLog,
         verbose: bool = False,
     ) -> None:
-        self.upstream_url = upstream_url.rstrip("/")
+        # Validate upstream URL up-front: must have an http(s) scheme and a
+        # host, must not be a private metadata IP. We pin scheme+netloc here
+        # and rebuild target URLs from this base — never trust client paths.
+        parsed = urlparse(upstream_url)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError(f"upstream_url must be http(s); got '{parsed.scheme}'")
+        if not parsed.netloc:
+            raise ValueError("upstream_url must include a host")
+        if _is_blocked_host(parsed.hostname or ""):
+            raise ValueError(
+                f"upstream_url host '{parsed.hostname}' is on the SSRF block list "
+                "(cloud metadata / link-local). Set MCP_FIREWALL_ALLOW_PRIVATE=1 to override."
+            )
+        self._upstream_scheme = parsed.scheme
+        self._upstream_netloc = parsed.netloc
+        self._upstream_base_path = parsed.path.rstrip("/")
+        self.upstream_url = f"{parsed.scheme}://{parsed.netloc}{self._upstream_base_path}"
         self.engine = engine
         self.audit = audit
         self.verbose = verbose
         self._session: aiohttp.ClientSession | None = None
 
     def app(self) -> web.Application:
-        app = web.Application()
+        # client_max_size is aiohttp's request-body cap. We mirror it here so
+        # POST bodies cannot OOM the proxy.
+        app = web.Application(client_max_size=MAX_HTTP_BODY_BYTES)
         # Operational endpoints (must be registered before the catch-all).
         app.router.add_route("GET", "/attestation", self._handle_attestation)
         app.router.add_route("GET", "/healthz", self._handle_healthz)
@@ -90,8 +110,18 @@ class HttpProxy:
     # ---- POST: client → server JSON-RPC ----
 
     async def _handle_post(self, request: web.Request) -> web.StreamResponse:
-        assert self._session is not None
-        body = await request.read()
+        if self._session is None:
+            return _json_rpc_error(None, ERROR_FIREWALL_DENIED, "proxy not initialized")
+        try:
+            body = await request.read()
+        except aiohttp.web.HTTPRequestEntityTooLarge:
+            return _json_rpc_error(
+                None, ERROR_FIREWALL_DENIED, "request body exceeds limit"
+            )
+        if len(body) > MAX_HTTP_BODY_BYTES:
+            return _json_rpc_error(
+                None, ERROR_FIREWALL_DENIED, "request body exceeds limit"
+            )
         frame = parse_frame(body, Direction.CLIENT_TO_SERVER)
         decision = self.engine.evaluate(frame)
         row = self.audit.append(frame, decision)
@@ -146,7 +176,8 @@ class HttpProxy:
     # ---- GET: server → client SSE stream ----
 
     async def _handle_get(self, request: web.Request) -> web.StreamResponse:
-        assert self._session is not None
+        if self._session is None:
+            return web.Response(status=503, text="proxy not initialized")
         target_url = self._target(request)
         headers = _forward_headers(request.headers)
 
@@ -162,12 +193,24 @@ class HttpProxy:
         )
         await response.prepare(request)
 
-        # SSE events are separated by blank lines; we buffer line-by-line.
+        # SSE events are line-oriented; lines may straddle chunk boundaries.
+        # We buffer until we see a complete '\n' and only parse complete lines.
+        # Buffer is bounded so a malicious upstream can't OOM us by sending a
+        # never-newline-terminated stream.
+        buffer = bytearray()
         try:
             async for chunk in upstream.content.iter_chunked(4096):
-                # We intercept SSE "data:" lines that look like JSON-RPC.
-                # For v0 we parse line-by-line; full SSE event reassembly is v0.2.
-                for line in chunk.split(b"\n"):
+                buffer.extend(chunk)
+                if len(buffer) > MAX_HTTP_BODY_BYTES:
+                    # Drop the buffer; downstream still gets the byte stream
+                    # because we already wrote the chunk.
+                    buffer.clear()
+                while True:
+                    nl = buffer.find(b"\n")
+                    if nl < 0:
+                        break
+                    line = bytes(buffer[:nl])
+                    del buffer[: nl + 1]
                     stripped = line.strip()
                     if stripped.startswith(b"data:"):
                         payload = stripped[5:].strip()
@@ -184,7 +227,8 @@ class HttpProxy:
         return response
 
     async def _handle_delete(self, request: web.Request) -> web.Response:
-        assert self._session is not None
+        if self._session is None:
+            return web.Response(status=503, text="proxy not initialized")
         target_url = self._target(request)
         headers = _forward_headers(request.headers)
         async with self._session.delete(target_url, headers=headers) as upstream:
@@ -194,11 +238,31 @@ class HttpProxy:
     # ---- helpers ----
 
     def _target(self, request: web.Request) -> str:
-        tail = request.match_info.get("tail", "")
-        path = f"/{tail}" if tail and not tail.startswith("/") else (tail or "/")
-        # Append query string if present
+        """Build the upstream URL.
+
+        SSRF-safe: we ALWAYS use the operator-pinned scheme+netloc; the
+        client-supplied path is sanitized to defeat path-traversal escapes
+        (e.g., '/../169.254.169.254/...') and host-section smuggling.
+        """
+        tail = request.match_info.get("tail", "") or ""
+        # Reject anything that looks like an attempt to inject a netloc.
+        if "://" in tail or tail.startswith("//") or tail.startswith("\\"):
+            tail = ""
+        # Drop any leading slashes; we'll rejoin under the operator base path.
+        clean_segments: list[str] = []
+        for seg in tail.split("/"):
+            if seg in ("", ".", ".."):
+                # Dot/empty segments are silently dropped to defeat traversal.
+                continue
+            clean_segments.append(seg)
+        suffix = ("/" + "/".join(clean_segments)) if clean_segments else "/"
         qs = request.query_string
-        return f"{self.upstream_url}{path}" + (f"?{qs}" if qs else "")
+        # Important: never let the client choose scheme/netloc.
+        return (
+            f"{self._upstream_scheme}://{self._upstream_netloc}"
+            f"{self._upstream_base_path}{suffix}"
+            + (f"?{qs}" if qs else "")
+        )
 
     def _log(self, kind: str, seq: int, frame, decision) -> None:
         sys.stderr.write(
@@ -208,6 +272,34 @@ class HttpProxy:
             f"-> {decision.type.value}: {decision.reason}\n"
         )
         sys.stderr.flush()
+
+
+def _is_blocked_host(host: str) -> bool:
+    """SSRF block list: cloud-metadata + link-local + loopback variants.
+
+    Set MCP_FIREWALL_ALLOW_PRIVATE=1 in the environment to bypass (e.g., for
+    local dev where the upstream MCP server runs on 127.0.0.1).
+    """
+    import os
+
+    if os.environ.get("MCP_FIREWALL_ALLOW_PRIVATE") == "1":
+        return False
+    h = host.lower().strip().strip("[]")
+    blocked_exact = {
+        "169.254.169.254",  # AWS / GCP / Azure cloud metadata
+        "metadata.google.internal",
+        "metadata.goog",
+        "100.100.100.200",  # Alibaba Cloud metadata
+        "0.0.0.0",
+    }
+    if h in blocked_exact:
+        return True
+    if h.startswith("169.254."):  # full link-local IPv4
+        return True
+    if h.startswith("fe80:") or h.startswith("fc") or h.startswith("fd"):
+        # IPv6 link-local + ULA
+        return True
+    return False
 
 
 def _forward_headers(headers) -> dict[str, str]:

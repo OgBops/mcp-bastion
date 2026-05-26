@@ -42,22 +42,86 @@ class KeyPair:
 
 
 def ensure_keypair(
-    public_path: Path = PUBLIC_KEY_PATH,
-    secret_path: Path = SECRET_KEY_PATH,
+    public_path: Path | None = None,
+    secret_path: Path | None = None,
 ) -> KeyPair:
-    """Load (or generate + persist) the audit signing keypair."""
+    # Late-bind so monkeypatched module attributes work in tests.
+    public_path = public_path if public_path is not None else PUBLIC_KEY_PATH
+    secret_path = secret_path if secret_path is not None else SECRET_KEY_PATH
+    """Load (or atomically generate + persist) the audit signing keypair.
+
+    Hardening:
+      - Key directory created with mode 0700 (other users cannot list).
+      - Secret key written with O_CREAT|O_EXCL so two concurrent processes
+        cannot race past the existence check and clobber each other; the
+        second process re-reads the winner's keys.
+      - Secret key written 0600, public key 0644.
+    """
+    public_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(public_path.parent, 0o700)
+    except OSError:
+        pass
+
+    # Fast path: both files already exist.
     if public_path.exists() and secret_path.exists():
         return KeyPair(
             public_key=public_path.read_bytes(),
             secret_key=secret_path.read_bytes(),
         )
+
     pk, sk = _mldsa.generate_keypair()
-    public_path.parent.mkdir(parents=True, exist_ok=True)
-    public_path.write_bytes(pk)
-    secret_path.write_bytes(sk)
+
+    # Atomic O_EXCL write of the secret key. If we lose the race, fall back
+    # to reading whatever the winning process produced.
+    try:
+        fd = os.open(
+            secret_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+    except FileExistsError:
+        # Another process wrote it first; load theirs.
+        return KeyPair(
+            public_key=public_path.read_bytes(),
+            secret_key=secret_path.read_bytes(),
+        )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(sk)
+    except Exception:
+        # Best-effort cleanup so we don't leave a half-written secret key.
+        try:
+            os.unlink(secret_path)
+        except OSError:
+            pass
+        raise
+
+    # Public key — same race-safe path. If it loses, that's fine.
+    try:
+        pfd = os.open(public_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        try:
+            with os.fdopen(pfd, "wb") as f:
+                f.write(pk)
+        except Exception:
+            try:
+                os.unlink(public_path)
+            except OSError:
+                pass
+            raise
+    except FileExistsError:
+        pass
+
     os.chmod(secret_path, 0o600)
     os.chmod(public_path, 0o644)
     return KeyPair(public_key=pk, secret_key=sk)
+
+
+def public_key_fingerprint(public_key: bytes) -> str:
+    """SHA256 fingerprint of the public key, used for out-of-band pinning."""
+    import hashlib
+
+    return hashlib.sha256(public_key).hexdigest()
 
 
 def sign(secret_key: bytes, message: bytes) -> bytes:

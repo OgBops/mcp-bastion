@@ -25,6 +25,7 @@ from .jsonrpc import (
     parse_frame,
     serialize_frame,
 )
+from .limits import MAX_FRAME_BYTES
 from .policy import PolicyEngine
 from .types import Decision, DecisionType, Direction
 
@@ -55,6 +56,7 @@ class StdioProxy:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=sys.stderr,
+            limit=MAX_FRAME_BYTES,
         )
 
         loop = asyncio.get_running_loop()
@@ -111,9 +113,27 @@ class StdioProxy:
         error_back,
     ) -> None:
         while True:
-            line = await src.readline()
+            try:
+                # Bounded read prevents a malicious peer from flooding a single
+                # line and OOMing the proxy. asyncio.StreamReader raises
+                # LimitOverrunError on overflow; we drain the rest of the
+                # offending line + drop it.
+                line = await src.readuntil(b"\n")
+            except asyncio.IncompleteReadError as e:
+                # EOF reached. Forward any partial buffer if non-empty.
+                line = e.partial
+                if not line:
+                    return
+            except asyncio.LimitOverrunError:
+                # Drain and drop the oversized frame; never forward it.
+                await self._drain_oversized(src)
+                self._record_oversized(direction)
+                continue
             if not line:
                 return
+            if len(line) > MAX_FRAME_BYTES:
+                self._record_oversized(direction)
+                continue
             # Skip pure whitespace lines (some stdio servers emit blank framing)
             if not line.strip():
                 if dst_write:
@@ -154,6 +174,28 @@ class StdioProxy:
             if dst_write:
                 dst_write(line)
 
+    async def _drain_oversized(self, src: asyncio.StreamReader) -> None:
+        """Read and discard bytes until we hit a newline or EOF, in MAX_FRAME_BYTES
+        chunks, so an attacker can't keep us reading forever."""
+        drained = 0
+        while drained < 16 * MAX_FRAME_BYTES:
+            try:
+                chunk = await src.read(MAX_FRAME_BYTES)
+            except Exception:
+                return
+            if not chunk:
+                return
+            drained += len(chunk)
+            if b"\n" in chunk:
+                return
+
+    def _record_oversized(self, direction: Direction) -> None:
+        sys.stderr.write(
+            f"[mcp-firewall] dropped oversized frame from {direction.value} "
+            f"(>{MAX_FRAME_BYTES} bytes)\n"
+        )
+        sys.stderr.flush()
+
     def _deny_error(self, decision: Decision) -> tuple[int, str]:
         if decision.matched_rule == "tool_description_pinning":
             return (
@@ -173,7 +215,9 @@ class StdioProxy:
 
 
 async def _stdin_reader(loop: asyncio.AbstractEventLoop) -> asyncio.StreamReader:
-    reader = asyncio.StreamReader(loop=loop)
+    # Pin the StreamReader buffer to our explicit MAX_FRAME_BYTES so that
+    # readuntil() raises LimitOverrunError instead of consuming unbounded RAM.
+    reader = asyncio.StreamReader(limit=MAX_FRAME_BYTES, loop=loop)
     protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
     return reader

@@ -49,15 +49,62 @@ class AuditLog:
     """SQLite-backed hash-chained append-only log with optional PQC signatures."""
 
     def __init__(self, path: Path, sign: bool = True) -> None:
+        import os as _os
+
         self.path = Path(path).expanduser()
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            _os.chmod(self.path.parent, 0o700)
+        except OSError:
+            pass
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
+        try:
+            _os.chmod(self.path, 0o600)
+        except OSError:
+            pass
         self._keypair = crypto.ensure_keypair() if sign else None
         self._sign_enabled = sign
+        if self._keypair is not None:
+            self._enforce_pinned_fingerprint()
+
+    def _enforce_pinned_fingerprint(self) -> None:
+        """Pin the first-seen public key fingerprint inside the DB.
+
+        Defends against an attacker who can rewrite both the audit DB *and*
+        the keypair on disk: the pinned fingerprint inside the DB must match
+        the current public key, otherwise verify_chain refuses the file.
+        """
+        if self._keypair is None:
+            return
+        fp = crypto.public_key_fingerprint(self._keypair.public_key)
+        cur = self.conn.execute(
+            "SELECT value FROM audit_meta WHERE key = 'public_key_fingerprint'"
+        ).fetchone()
+        if cur is None:
+            self.conn.execute(
+                "INSERT INTO audit_meta (key, value) VALUES (?, ?)",
+                ("public_key_fingerprint", fp),
+            )
+            self.conn.commit()
+        elif cur["value"] != fp:
+            raise RuntimeError(
+                "audit log public-key fingerprint mismatch: "
+                f"db pinned {cur['value'][:16]}…, current key {fp[:16]}…. "
+                "Either someone substituted the keypair OR you're pointing at "
+                "another machine's audit log. Refusing to use this DB."
+            )
 
     def _init_schema(self) -> None:
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS audit (

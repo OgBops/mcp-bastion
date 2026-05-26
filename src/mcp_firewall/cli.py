@@ -134,11 +134,26 @@ def up(
     # HTTP mode
     host, _, port_s = listen.partition(":")
     if not port_s:
-        raise click.UsageError("--listen must be host:port")
-    port = int(port_s)
-    proxy = HttpProxy(upstream_url, engine, audit, verbose=verbose)
+        raise click.UsageError("--listen must be host:port (use 127.0.0.1:8080)")
     try:
-        asyncio.run(serve_http(host or "127.0.0.1", port, proxy))
+        port = int(port_s)
+    except ValueError as e:
+        raise click.UsageError(f"--listen port must be integer: {e}") from e
+    if not (1 <= port <= 65535):
+        raise click.UsageError(f"--listen port out of range: {port}")
+    bind_host = host or "127.0.0.1"
+    if bind_host in ("0.0.0.0", "::", "*"):
+        click.echo(
+            f"WARNING: binding to {bind_host} exposes the proxy to the network. "
+            "Use 127.0.0.1 unless you've intentionally fronted this with TLS+auth.",
+            err=True,
+        )
+    try:
+        proxy = HttpProxy(upstream_url, engine, audit, verbose=verbose)
+    except ValueError as e:
+        raise click.UsageError(str(e)) from e
+    try:
+        asyncio.run(serve_http(bind_host, port, proxy))
     finally:
         audit.close()
 
