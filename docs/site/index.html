@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Open-source security gateway for the Model Context Protocol. Inspects every tool call. PQC-signed audit log. Optional prompt-injection classifier. Nitro Enclave attestation." />
+  <meta name="color-scheme" content="dark light" />
+  <meta property="og:title" content="mcp-bastion — security gateway for MCP" />
+  <meta property="og:description" content="Inspects every JSON-RPC frame between your AI agent and its MCP servers. Policy-driven. Tamper-evident audit. Open source." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <title>mcp-bastion · security gateway for the Model Context Protocol</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='90'%3E🛡️%3C/text%3E%3C/svg%3E" />
+  <style>
+    :root {
+      --bg: #0b0d10;
+      --surface: #14181d;
+      --surface-2: #1c2127;
+      --border: #2a3138;
+      --text: #e7e9ec;
+      --text-dim: #9aa3ad;
+      --accent: #ff8a4c;
+      --accent-2: #ffb37a;
+      --good: #4ade80;
+      --warn: #facc15;
+      --bad: #f87171;
+      --mono: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+      --max: 980px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-2); text-decoration: underline; }
+    code, pre, kbd { font-family: var(--mono); }
+    code { background: var(--surface-2); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.92em; }
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 1rem 1.25rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.92em;
+      line-height: 1.5;
+    }
+    pre code { background: transparent; padding: 0; }
+    main { max-width: var(--max); margin: 0 auto; padding: 0 1.25rem; }
+    h1, h2, h3 { font-weight: 700; line-height: 1.25; }
+    h1 { font-size: 2.5rem; margin: 0 0 0.5rem; letter-spacing: -0.02em; }
+    h2 { font-size: 1.6rem; margin: 3rem 0 1rem; letter-spacing: -0.01em; }
+    h3 { font-size: 1.15rem; margin: 0 0 0.4rem; }
+
+    /* HERO */
+    header.hero {
+      padding: 5rem 1.25rem 3rem;
+      max-width: var(--max);
+      margin: 0 auto;
+      border-bottom: 1px solid var(--border);
+    }
+    .hero .badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      background: rgba(255, 138, 76, 0.1);
+      border: 1px solid rgba(255, 138, 76, 0.3);
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      margin-bottom: 1rem;
+    }
+    .hero p.tagline {
+      font-size: 1.2rem;
+      color: var(--text-dim);
+      margin: 0.5rem 0 1.75rem;
+      max-width: 640px;
+    }
+    .cta-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.5rem; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.65rem 1.1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      border: 1px solid transparent;
+      transition: transform 0.05s ease, background 0.1s ease;
+    }
+    .btn:hover { text-decoration: none; transform: translateY(-1px); }
+    .btn.primary { background: var(--accent); color: #1a0e05; }
+    .btn.primary:hover { background: var(--accent-2); color: #1a0e05; }
+    .btn.secondary { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+    .btn.secondary:hover { background: var(--surface); }
+    .install {
+      margin-top: 1.5rem;
+      max-width: 540px;
+    }
+    .install pre { margin: 0; }
+    .install .pip-line { color: var(--text); }
+    .install .pip-line .prompt { color: var(--accent); user-select: none; }
+
+    /* STATUS strip */
+    .status {
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      margin-top: 2rem;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: var(--text-dim);
+    }
+    .status .dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      margin-right: 0.4rem; vertical-align: middle;
+    }
+    .status .dot.good { background: var(--good); }
+    .status .dot.warn { background: var(--warn); }
+
+    /* SECTIONS */
+    section { padding: 1rem 0; }
+
+    /* WHY */
+    .why-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+      margin-top: 1rem;
+    }
+    @media (max-width: 720px) { .why-grid { grid-template-columns: 1fr; } }
+    .why-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 1.25rem;
+      border-radius: 8px;
+    }
+    .why-card .num {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+    }
+
+    /* FEATURES */
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    @media (max-width: 720px) { .features { grid-template-columns: 1fr; } }
+    .feature {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 1.1rem 1.25rem;
+      border-radius: 8px;
+    }
+    .feature h3 {
+      font-size: 1rem;
+      color: var(--text);
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .feature h3 .icon {
+      width: 22px; height: 22px;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--accent);
+    }
+    .feature p {
+      margin: 0.4rem 0 0;
+      color: var(--text-dim);
+      font-size: 0.93rem;
+      line-height: 1.55;
+    }
+
+    /* DEMO */
+    .demo-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 1rem;
+    }
+    .demo-block pre {
+      background: transparent;
+      border: none;
+      margin: 0;
+      padding: 1.25rem;
+      font-size: 0.86rem;
+    }
+    .demo-block .term-header {
+      background: var(--surface-2);
+      padding: 0.5rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .term-header .traffic { display: inline-flex; gap: 5px; }
+    .term-header .traffic span {
+      width: 11px; height: 11px; border-radius: 50%;
+      background: var(--text-dim);
+      display: inline-block;
+    }
+    .deny { color: var(--bad); }
+    .allow { color: var(--good); }
+    .meta { color: var(--text-dim); }
+    .accent { color: var(--accent); }
+
+    /* PARTNERS */
+    .partners-card {
+      background: linear-gradient(135deg, rgba(255, 138, 76, 0.08), rgba(255, 138, 76, 0.02));
+      border: 1px solid rgba(255, 138, 76, 0.25);
+      padding: 2rem;
+      border-radius: 10px;
+      margin-top: 1rem;
+    }
+    .partners-card h2 { margin-top: 0; }
+    .partners-card ul { padding-left: 1.25rem; }
+    .partners-card li { margin: 0.4rem 0; color: var(--text-dim); }
+
+    /* THREAT TABLE */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.92rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      color: var(--text-dim);
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    td .ok { color: var(--good); }
+
+    /* FOOTER */
+    footer {
+      max-width: var(--max);
+      margin: 4rem auto 2rem;
+      padding: 2rem 1.25rem;
+      border-top: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 0.88rem;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    footer a { color: var(--text-dim); }
+    footer a:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <span class="badge">v0.3.1 · ALPHA · 47 TESTS PASSING</span>
+    <h1>🛡️ mcp-bastion</h1>
+    <p class="tagline">
+      The open-source security gateway for the Model Context Protocol.
+      Inspects every tool call your AI agent makes. Enforces policy.
+      Logs everything to a post-quantum-signed, tamper-evident audit trail.
+    </p>
+
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/OgBops/mcp-bastion">View on GitHub →</a>
+      <a class="btn secondary" href="https://github.com/OgBops/mcp-bastion#60-second-demo">60-second demo</a>
+      <a class="btn secondary" href="#design-partners">Become a design partner</a>
+    </div>
+
+    <div class="install">
+      <pre><code><span class="meta"># Install (PyPI publish pending — install from source for now)</span>
+<span class="pip-line"><span class="prompt">$</span> git clone https://github.com/OgBops/mcp-bastion</span>
+<span class="pip-line"><span class="prompt">$</span> cd mcp-bastion && pip install -e ".[dev]"</span>
+<span class="pip-line"><span class="prompt">$</span> mcp-bastion --version
+mcp-bastion, version 0.3.1</span></code></pre>
+    </div>
+
+    <div class="status">
+      <span><span class="dot good"></span>47/47 tests passing</span>
+      <span><span class="dot good"></span>pip-audit clean</span>
+      <span><span class="dot good"></span>Apache 2.0</span>
+      <span><span class="dot warn"></span>Alpha — not production-ready</span>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Why this exists</h2>
+      <div class="why-grid">
+        <div class="why-card">
+          <span class="num">01</span>
+          <p>
+            The Model Context Protocol shipped in November 2024. Adoption is now
+            everywhere — ChatGPT, Gemini, Copilot, Cursor, Claude.
+            <a href="https://modelcontextprotocol.io/registry/about" target="_blank" rel="noopener">
+              The official MCP Registry delegates security scanning to upstream
+              package registries
+            </a>. There is no built-in policy layer.
+          </p>
+        </div>
+        <div class="why-card">
+          <span class="num">02</span>
+          <p>
+            The spec authors themselves named
+            <a href="https://modelcontextprotocol.io/development/roadmap" target="_blank" rel="noopener">
+              "gateway and proxy patterns"
+            </a>
+            as an open enterprise problem on the 2026 roadmap. <em>The gateway
+            layer is missing on purpose</em>, waiting for someone to build it.
+          </p>
+        </div>
+        <div class="why-card">
+          <span class="num">03</span>
+          <p>
+            Three pure-play AI security startups (Lakera, Protect AI, Robust
+            Intelligence) sold to Check Point, Palo Alto, and Cisco within 12
+            months. The buyers are paying — but none ship MCP-protocol-native
+            policy. mcp-bastion does.
+          </p>
+        </div>
+        <div class="why-card">
+          <span class="num">04</span>
+          <p>
+            Security middleware always emerges <em>after</em> a protocol
+            standardizes — TCP/IP → firewalls (8 yrs), HTTP → WAFs (6 yrs),
+            REST → API gateways (3 yrs). MCP is in year two. The window is
+            open and short.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>What it does</h2>
+      <div class="features">
+
+        <div class="feature">
+          <h3><span class="icon">→</span>Wraps stdio MCP servers</h3>
+          <p>
+            Drop-in wrapper for <code>uvx mcp-server-filesystem</code>,
+            <code>npx @modelcontextprotocol/server-github</code>, and any
+            other stdio MCP server. Bidirectional JSON-RPC interception,
+            bounded reads (no DoS).
+          </p>
+        </div>
+
+        <div class="feature">
+          <h3><span class="icon">↔</span>Reverse-proxies HTTP MCP</h3>
+          <p>
+            Streamable HTTP transport supported. SSRF block list defends
+            against cloud-metadata + link-local upstreams. Body-size cap
+            and SSE chunk-boundary buffering built in.
+          </p>
+        </div>
+
+        <div class="feature">
+          <h3><span class="icon">⛔</span>Policy-driven</h3>
+          <p>
+            YAML policy: deny tools by glob, redact arguments by regex,
+            require human approval for destructive calls. Backtracking-safe
+            regex with per-call timeout.
+          </p>
+        </div>
+
+        <div class="feature">
+          <h3><span class="icon">📌</span>Pins tool descriptions</h3>
+          <p>
+            SHA256 of every tool description on first sight. Alerts or
+            blocks when a description mutates — the canonical defense against
+            <a href="https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks" target="_blank" rel="noopener">tool poisoning</a>.
+          </p>
+        </div>
+
+        <div class="feature">
+          <h3><span class="icon">🤖</span>Prompt-injection classifier</h3>
+          <p>
+            Optional. Lazy-loads ProtectAI's fine-tuned DeBERTa to score
+            tool descriptions. ~50ms inference. Configurable threshold +
+            alert/block modes.
+          </p>
+        </div>
+
+        <div class="feature">
+          <h3><span class="icon">🔏</span>PQC-signed audit log</h3>
+          <p>
+            Every audit row signed with NIST ML-DSA-44
+            (<a href="https://csrc.nist.gov/pubs/fips/204/final" target="_blank" rel="noopener">FIPS 204</a>).
+            Hash-chained SQLite + sidecar JSONL anchor file. Public-key
+            fingerprint pinned in the DB.
+          </p>
+        </div>
+
+        <div class="feature">
+          <h3><span class="icon">🔑</span>OS keychain key custody</h3>
+          <p>
+            Secret signing key lives in macOS Keychain / Linux Secret
+            Service / Windows Credential Locker by default. Root must
+            actively bypass — every read leaves an OS audit trail.
+          </p>
+        </div>
+
+        <div class="feature">
+          <h3><span class="icon">🏰</span>Nitro Enclave attestation</h3>
+          <p>
+            Run inside an AWS Nitro Enclave. Customers verify the running
+            binary by querying <code>/attestation</code> with a fresh nonce
+            and matching the PCRs against published release artifacts.
+          </p>
+        </div>
+
+      </div>
+    </section>
+
+    <section>
+      <h2>60-second demo</h2>
+      <p style="color: var(--text-dim);">
+        Real output from <code>mcp-bastion</code> in front of an MCP server,
+        with a deny rule for <code>shell.*</code>:
+      </p>
+      <div class="demo-block">
+        <div class="term-header">
+          <span class="traffic"><span></span><span></span><span></span></span>
+          <span>terminal — mcp-bastion up</span>
+        </div>
+        <pre><code><span class="meta">[mcp-bastion #1]</span> c2s tools/list                        <span class="allow">→ allow:</span> default allow
+<span class="meta">[mcp-bastion #2]</span> c2s tools/call <span class="accent">tool#3dca4690</span>          <span class="deny">→ deny:</span>  tool#3dca4690 matched 'shell.*'
+<span class="meta">[mcp-bastion #3]</span> c2s tools/call <span class="accent">tool#1aa2befd</span>          <span class="allow">→ allow:</span> no rule matched
+
+<span class="meta">// JSON-RPC error returned to the client (upstream never saw the call):</span>
+{"jsonrpc":"2.0","id":2,"error":{"code":-32001,"message":"denied by mcp-bastion: tool#3dca4690 matched deny rule 'shell.*'"}}
+
+<span class="meta">$ mcp-bastion inspect-log --verify</span>
+<span class="allow">chain: OK</span> (ok)</code></pre>
+      </div>
+      <p style="color: var(--text-dim); font-size: 0.9rem; margin-top: 0.75rem;">
+        Tool names appear as <code>tool#&lt;hash&gt;</code> in logs and error
+        responses so a tool with a secret-bearing name doesn't leak through
+        verbose output.
+      </p>
+    </section>
+
+    <section>
+      <h2>Threats it defends against</h2>
+      <table>
+        <thead>
+          <tr><th>Threat</th><th>Defense</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Tool poisoning / description drift</td><td><span class="ok">●</span> SHA256 pinning + classifier</td></tr>
+          <tr><td>Token exfiltration via tool args</td><td><span class="ok">●</span> Regex redaction with timeout</td></tr>
+          <tr><td>Indirect prompt injection in tool descriptions</td><td><span class="ok">●</span> Optional ProtectAI DeBERTa classifier</td></tr>
+          <tr><td>Audit log tampering</td><td><span class="ok">●</span> Hash chain + ML-DSA-44 sigs + sidecar anchor</td></tr>
+          <tr><td>SSRF via upstream URL</td><td><span class="ok">●</span> Metadata-IP block list + path sanitization</td></tr>
+          <tr><td>stdio / HTTP DoS via oversized frames</td><td><span class="ok">●</span> Bounded reads + JSON depth cap</td></tr>
+          <tr><td>ReDoS via policy-supplied regex</td><td><span class="ok">●</span> Pattern length cap + per-call timeout</td></tr>
+          <tr><td>Tool name leak via logs</td><td><span class="ok">●</span> Hashed labels (<code>tool#xxxxxxxx</code>)</td></tr>
+          <tr><td>Local secret-key disclosure</td><td><span class="ok">●</span> OS keychain by default</td></tr>
+          <tr><td>Compromised proxy binary (root attacker)</td><td><span class="ok">●</span> Nitro Enclave attestation</td></tr>
+        </tbody>
+      </table>
+      <p style="color: var(--text-dim); font-size: 0.85rem; margin-top: 0.75rem;">
+        Full threat model + vulnerability disclosure policy in
+        <a href="https://github.com/OgBops/mcp-bastion/blob/main/SECURITY.md">SECURITY.md</a>.
+      </p>
+    </section>
+
+    <section id="design-partners">
+      <div class="partners-card">
+        <h2>Design partners wanted</h2>
+        <p>
+          We're working with a small group of teams running MCP in production.
+          The deal:
+        </p>
+        <ul>
+          <li><strong>You bring:</strong> a real MCP-using workload + 30 min/week of honest feedback for 8 weeks.</li>
+          <li><strong>We bring:</strong> free deployment help, weekly co-dev calls, direct line to maintainers, a public testimonial after launch.</li>
+        </ul>
+        <p>Best fit:</p>
+        <ul>
+          <li>Mid-stage AI-forward companies (Cursor / Claude Code / Codex in production)</li>
+          <li>FinTech or HealthTech orgs with audit/compliance requirements</li>
+          <li>Platform engineering teams running an internal MCP server registry</li>
+        </ul>
+        <p style="margin-top: 1.25rem;">
+          <a class="btn primary" href="https://github.com/OgBops/mcp-bastion/issues/new?title=Design+partner+inquiry&body=Tell+us+about+your+MCP+deployment%3A">
+            Open a "Design partner inquiry" issue →
+          </a>
+        </p>
+      </div>
+    </section>
+
+    <section>
+      <h2>What's next</h2>
+      <p>
+        v0.3.1 is the local data-plane. The commercial cloud control plane —
+        multi-tenant policy management, threat-intel network with differential
+        privacy, S3 Object Lock audit anchoring, SIEM forwarding, and
+        Nitro-attestation verification — lives in a separate repo and ships
+        in phased milestones over the next 6 months. See
+        <a href="https://github.com/OgBops/mcp-bastion/blob/main/CONTROL_PLANE.md">CONTROL_PLANE.md</a>
+        for the spec.
+      </p>
+    </section>
+
+  </main>
+
+  <footer>
+    <div>
+      © 2026 mcp-bastion contributors · Apache 2.0 ·
+      <a href="https://github.com/OgBops/mcp-bastion">GitHub</a> ·
+      <a href="https://github.com/OgBops/mcp-bastion/blob/main/SECURITY.md">Security</a> ·
+      <a href="https://github.com/OgBops/mcp-bastion/blob/main/CHANGELOG.md">Changelog</a>
+    </div>
+    <div>
+      Independent project; not affiliated with <code>ressl/mcp-firewall</code>
+      or any other similarly-named project.
+    </div>
+  </footer>
+</body>
+</html>
