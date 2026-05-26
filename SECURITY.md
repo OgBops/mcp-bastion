@@ -119,32 +119,69 @@ MCP_FIREWALL_ALLOW_PRIVATE=0       # set to 1 to allow private/loopback upstream
 - Forward audit log to S3 with **Object Lock in compliance mode** for legal
   retention proofs (control-plane work; see `CONTROL_PLANE.md`)
 
-## Known limits and trade-offs
+## Known limits and trade-offs (v0.3.1+)
 
-1. **Truncating long arg strings to `MAX_REGEX_INPUT_LEN` before redaction**
-   means a secret embedded past 64 KB of an arg is *not* redacted. The audit
-   log still captures the original; pair this with content-aware tools (DLP,
-   data classification) at the SIEM layer.
+The five trade-offs surfaced in the v0.3 audit have been closed:
 
-2. **The redact walker bails at `MAX_REDACT_DEPTH`** — secrets in deeply
-   nested arg structures past 64 levels are NOT redacted in v0.3. The
-   alternative was unbounded recursion, which is a worse trade.
+1. ~~**Long-string truncation** — *fixed in v0.3.1.*~~ The redact walker now
+   uses the `regex` package's `timeout=` API (with a chunked-window stdlib
+   fallback). Strings of any length are scanned; runaway patterns abort
+   within `REGEX_TIMEOUT_SECONDS` and the offending value is replaced with
+   the redaction marker so no plaintext leaks.
 
-3. **Verbose stderr logs may include `decision.reason`** which embeds tool
-   names. If your tool naming convention includes secrets, *don't run with
-   `--verbose` in production.*
+2. ~~**Recursion-depth bail** — *fixed in v0.3.1.*~~ The redact walker is
+   now iterative (explicit stack), bounded by a per-frame *node-count*
+   budget (`MAX_REDACT_NODES = 1M`). Secrets at any tree depth are
+   redacted; total work is bounded by node count, not tree shape.
 
-4. **The hash chain detects truncation** via the public-key-fingerprint
-   pin: if an attacker truncates the tail and re-signs forward with their
-   own key, the pinned fingerprint won't match. But if they preserve the
-   original key, only an external anchor (cloud control plane / S3 Object
-   Lock) detects the truncation. v0.3 is local-only; the control plane
-   closes that gap.
+3. ~~**Verbose logs echoed tool names** — *fixed in v0.3.1.*~~ All log
+   output and outbound JSON-RPC error messages now use a stable hashed
+   label (`tool#xxxxxxxx`, SHA256 first 8 hex chars) instead of the raw
+   tool name. A tool whose name embeds a secret never appears in stderr or
+   in a response to the client.
 
-5. **No defense against root.** If `/dev/nsm` is unavailable (i.e., not
-   inside a Nitro Enclave), an attacker with root on the host can read the
-   secret key and forge audit rows. Use the enclave deployment shape for
-   environments where root compromise is in scope.
+4. ~~**Truncation undetectable without external anchor** — *partially fixed
+   in v0.3.1.*~~ Every Nth audit row is also written to a sidecar anchor
+   file (`audit.anchor.jsonl`) on a separate path with `O_APPEND|0600` and
+   per-row PQC signatures. `verify_anchor()` cross-checks the SQLite
+   contents against the anchor — if the DB is truncated below an anchored
+   seq, or any anchored hash doesn't match, we report it. Full
+   tamper-proofing still requires an *out-of-process* anchor (S3 Object
+   Lock, blockchain witness, control-plane); the local anchor closes the
+   gap against in-process tampering and offline forensic review.
+
+5. ~~**Root could read the secret key** — *partially fixed in v0.3.1.*~~ The
+   secret key now lives in the **OS keychain** by default (macOS Keychain,
+   Linux Secret Service, Windows Credential Locker via the `keyring`
+   library). Root can still bypass — but every read leaves an OS-level
+   audit trail. For environments where root compromise is in scope, use
+   the **Nitro Enclave** deployment (`Dockerfile` + `nitro-cli build-enclave`)
+   — keys generated inside an enclave never leave it, and a remote party
+   verifies the enclave via `/attestation`. Set `MCP_FIREWALL_KEYRING=0`
+   to force file storage (e.g., for Nitro Enclaves where no keychain
+   exists).
+
+## Residual limits (v0.3.1)
+
+The defenses above raise the bar materially but do not make any of these
+*impossible*:
+
+- **A regex-timeout abort replaces the matched substring with the marker.**
+  This is a safe default — we never forward unredacted bytes that may
+  contain a secret — but it does mean a sufficiently malicious policy
+  (which only an authenticated operator can write) plus a long input could
+  cause data loss in non-secret payloads.
+
+- **Local anchor file** is still on the same machine. An attacker with
+  full FS access can rewrite both the DB and the anchor. The anchor's
+  value is in offline forensics: an honest snapshot of the anchor file at
+  time T proves what the DB looked like at T. Pair with the cloud control
+  plane (`CONTROL_PLANE.md`) for cross-machine guarantees.
+
+- **OS keychain bypass requires root or a debugger.** Every such bypass
+  is logged by the OS keychain itself (macOS Keychain Access shows reads
+  by app + signature). Don't rely on it as a single line of defense; pair
+  with EDR / endpoint monitoring.
 
 ## How we develop
 

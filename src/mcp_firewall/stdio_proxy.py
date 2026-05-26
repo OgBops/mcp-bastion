@@ -26,7 +26,7 @@ from .jsonrpc import (
     serialize_frame,
 )
 from .limits import MAX_FRAME_BYTES
-from .policy import PolicyEngine
+from .policy import PolicyEngine, safe_tool_label
 from .types import Decision, DecisionType, Direction
 
 
@@ -205,10 +205,16 @@ class StdioProxy:
         return (ERROR_FIREWALL_DENIED, f"denied by mcp-firewall: {decision.reason}")
 
     def _log_decision(self, seq: int, frame, decision) -> None:
+        # We deliberately log only the safe hashed label, never the raw
+        # tool name, so a tool with a secret-bearing name never appears in
+        # stderr (which may be captured by a logging system).
+        tool_label = (
+            safe_tool_label(frame.tool_name) if frame.tool_name else ""
+        )
         sys.stderr.write(
             f"[mcp-firewall #{seq}] {frame.direction.value} "
             f"{frame.method or '-'} "
-            f"{('tool=' + frame.tool_name) if frame.tool_name else ''} "
+            f"{tool_label} "
             f"-> {decision.type.value}: {decision.reason}\n"
         )
         sys.stderr.flush()

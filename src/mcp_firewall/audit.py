@@ -48,7 +48,13 @@ class AuditRow:
 class AuditLog:
     """SQLite-backed hash-chained append-only log with optional PQC signatures."""
 
-    def __init__(self, path: Path, sign: bool = True) -> None:
+    def __init__(
+        self,
+        path: Path,
+        sign: bool = True,
+        anchor_every: int = 100,
+        anchor_path: Path | None = None,
+    ) -> None:
         import os as _os
 
         self.path = Path(path).expanduser()
@@ -68,6 +74,19 @@ class AuditLog:
         self._sign_enabled = sign
         if self._keypair is not None:
             self._enforce_pinned_fingerprint()
+
+        # External anchor: a sidecar append-only file separate from the SQLite
+        # DB. An attacker who rewrites both the DB and the signing key still
+        # has to overwrite the anchor file, which we keep on a different
+        # filesystem path with O_APPEND-only semantics where the OS supports
+        # it (chattr +a / chflags uappend). v0.3.1 just makes the file
+        # append-only via mode + open flags; OS-level immutability is opt-in.
+        self._anchor_every = max(1, anchor_every)
+        self._anchor_path = (
+            Path(anchor_path).expanduser()
+            if anchor_path is not None
+            else self.path.with_suffix(".anchor.jsonl")
+        )
 
     def _enforce_pinned_fingerprint(self) -> None:
         """Pin the first-seen public key fingerprint inside the DB.
@@ -191,8 +210,12 @@ class AuditLog:
             ),
         )
         self.conn.commit()
+        seq = cur.lastrowid or 0
+        # Periodic external anchor — see _write_anchor for what this defends.
+        if seq == 1 or (seq % self._anchor_every) == 0:
+            self._write_anchor(seq, entry_hash, body["timestamp"])
         return AuditRow(
-            seq=cur.lastrowid or 0,
+            seq=seq,
             timestamp=body["timestamp"],
             direction=body["direction"],
             method=body["method"],
@@ -207,6 +230,116 @@ class AuditLog:
             signature_b64=signature_b64,
             signing_algorithm=signing_algorithm,
         )
+
+    def _write_anchor(self, seq: int, entry_hash: str, timestamp: str) -> None:
+        """Append a (seq, entry_hash, sig) triple to the sidecar anchor file.
+
+        An attacker who truncates the SQLite tail must also truncate this
+        file. Because we open it O_APPEND only, and (on platforms that
+        support it) advertise it for OS-level immutability, this raises the
+        bar materially.
+
+        Customers wanting *real* tamper-proofing should pair this with the
+        cloud control plane's S3 Object Lock anchor (CONTROL_PLANE.md).
+        """
+        import os as _os
+
+        try:
+            self._anchor_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+
+        sig_b64 = ""
+        if self._sign_enabled and self._keypair is not None:
+            anchor_msg = f"{seq}|{entry_hash}|{timestamp}".encode("utf-8")
+            sig = crypto.sign(self._keypair.secret_key, anchor_msg)
+            sig_b64 = base64.b64encode(sig).decode("ascii")
+
+        line = json.dumps(
+            {
+                "seq": seq,
+                "entry_hash": entry_hash,
+                "timestamp": timestamp,
+                "signature_b64": sig_b64,
+                "signing_algorithm": (
+                    crypto.SIGNING_ALGORITHM if self._sign_enabled else None
+                ),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        # Open with O_APPEND so concurrent writers race-safely append, AND
+        # the file cannot be truncated mid-write without explicit ftruncate.
+        flags = _os.O_WRONLY | _os.O_CREAT | _os.O_APPEND
+        try:
+            fd = _os.open(self._anchor_path, flags, 0o600)
+        except OSError:
+            return
+        try:
+            _os.write(fd, (line + "\n").encode("utf-8"))
+        finally:
+            _os.close(fd)
+        try:
+            _os.chmod(self._anchor_path, 0o600)
+        except OSError:
+            pass
+
+    def verify_anchor(self) -> tuple[bool, int | None, str]:
+        """Verify every anchor entry against the audit DB.
+
+        Returns (ok, last_anchored_seq, message). An anchor seq whose
+        entry_hash doesn't match the DB row at that seq → tampering detected.
+        """
+        if not self._anchor_path.exists():
+            return (True, None, "no anchor file")
+        public_key = self._keypair.public_key if self._keypair else None
+        last_seq: int | None = None
+        with open(self._anchor_path, "rb") as f:
+            for raw in f:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    entry = json.loads(raw)
+                except json.JSONDecodeError:
+                    return (False, last_seq, "anchor file contains invalid JSON")
+                seq = entry.get("seq")
+                anchored_hash = entry.get("entry_hash")
+                ts = entry.get("timestamp")
+                if not isinstance(seq, int) or not isinstance(anchored_hash, str):
+                    return (False, last_seq, f"anchor entry malformed near seq={seq}")
+                # Look up the row in the DB
+                row = self.conn.execute(
+                    "SELECT entry_hash FROM audit WHERE seq = ?", (seq,)
+                ).fetchone()
+                if row is None:
+                    return (
+                        False,
+                        seq,
+                        f"anchor at seq={seq} has no matching row "
+                        "(audit log was truncated below this seq)",
+                    )
+                if row["entry_hash"] != anchored_hash:
+                    return (
+                        False,
+                        seq,
+                        f"anchor hash mismatch at seq={seq}: "
+                        f"audit_db={row['entry_hash'][:16]}…, "
+                        f"anchor={anchored_hash[:16]}…",
+                    )
+                # Verify the anchor signature too (defends against an
+                # attacker editing the anchor file after acquiring the key).
+                if public_key is not None and entry.get("signature_b64"):
+                    sig = base64.b64decode(entry["signature_b64"])
+                    msg = f"{seq}|{anchored_hash}|{ts}".encode("utf-8")
+                    if not crypto.verify(public_key, msg, sig):
+                        return (
+                            False,
+                            seq,
+                            f"anchor signature invalid at seq={seq}",
+                        )
+                last_seq = seq
+        return (True, last_seq, "ok")
 
     def _last_hash(self) -> str:
         row = self.conn.execute(

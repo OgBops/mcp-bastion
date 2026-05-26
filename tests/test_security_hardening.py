@@ -72,44 +72,68 @@ def test_regex_pattern_must_be_valid():
         )
 
 
-# C3 — input length truncation bounds backtracking time.
-def test_redact_truncates_oversized_input(monkeypatch):
-    monkeypatch.setattr(limits, "MAX_REGEX_INPUT_LEN", 10)
-    # Reload the policy module's reference so the function sees the new limit.
-    import importlib
-
+# L1 — long strings are scanned end-to-end (no truncation), but with a
+# wall-clock timeout that aborts catastrophic patterns.
+def test_redact_handles_long_strings_end_to_end():
     from mcp_firewall import policy as pol
 
-    importlib.reload(pol)
     rules = pol.Policy.from_dict(
-        {"redact_args": [{"pattern": r"X+", "replacement": "[X]"}]}
+        {"redact_args": [{"pattern": r"sk-[A-Za-z0-9]{20,}", "replacement": "[REDACTED]"}]}
     ).redact_rules
-    # With the limit at 10, only the first 10 chars are scanned by the regex.
-    long = "X" * 50
-    out, count = pol._redact_in_place(long, rules)
-    assert count == 1  # one match in the truncated head
-    assert out.startswith("[X]")
-    assert out.endswith("X")  # untouched suffix re-attached
+    # 200KB of filler with a secret near the END — past v0.3's truncation point.
+    secret = "sk-" + "A" * 30
+    payload = ("X" * 200_000) + " " + secret + " trailing"
+    container = {"args": payload}
+    out, count = pol._redact_in_place(container, rules)
+    assert count == 1
+    assert "sk-" not in out["args"]
+    assert "[REDACTED]" in out["args"]
 
 
-# M3 — recursion depth bounded.
-def test_redact_bails_at_max_depth():
-    # Build a deeply nested arg structure.
-    cur: dict | list = []
-    root = cur
-    for _ in range(limits.MAX_REDACT_DEPTH + 5):
+def test_redact_aborts_catastrophic_pattern():
+    """An attacker-supplied pathological pattern times out instead of hanging."""
+    from mcp_firewall import policy as pol
+
+    # Classic ReDoS: (a+)+b against many a's
+    rules = pol.Policy.from_dict(
+        {"redact_args": [{"pattern": r"(a+)+b", "replacement": "[X]"}]}
+    ).redact_rules
+    payload = "a" * 60  # Long enough to cause catastrophic backtracking
+    container = {"v": payload}
+    import time
+
+    t0 = time.monotonic()
+    out, count = pol._redact_in_place(container, rules)
+    elapsed = time.monotonic() - t0
+    # Without timeout, this would hang for minutes. With timeout, well under 2s.
+    assert elapsed < 2.0, f"redact took {elapsed:.1f}s — timeout not enforced"
+    # Either the regex completed (no match) or the timeout marker landed.
+    assert "v" in out
+
+
+# L2 — iterative walker handles arbitrarily deep trees without recursion-
+# limit failures, and successfully redacts secrets at the leaf.
+def test_redact_handles_deep_tree():
+    # 10,000 levels of nested lists — well past Python's 1000-frame default
+    # recursion limit. Recursive walker would crash; iterative walker handles
+    # it cleanly.
+    cur: list = []
+    root = {"r": cur}
+    for _ in range(10_000):
         nxt: list = []
         cur.append(nxt)
         cur = nxt
-    cur.append("sk-aaaaaaaaaaaaaaaaaaaaaaaa")  # would normally redact
+    cur.append("sk-aaaaaaaaaaaaaaaaaaaaaaaa")
     rules = Policy.from_dict(
         {"redact_args": [{"pattern": r"sk-[A-Za-z0-9]{20,}", "replacement": "[X]"}]}
     ).redact_rules
     out, count = _redact_in_place(root, rules)
-    # Beyond MAX_REDACT_DEPTH the walker bails; the deep secret is NOT redacted
-    # in v0.3, but we don't crash. This is a documented behavior, not a hole —
-    # the audit log still captures the original frame.
-    assert count == 0
+    assert count == 1, "deep secret should be redacted by iterative walker"
+    # Walk back down to verify
+    n = out["r"]
+    for _ in range(10_000):
+        n = n[0]
+    assert n[0] == "[X]"
 
 
 # H1 / SSRF — HttpProxy rejects metadata IP upstreams.

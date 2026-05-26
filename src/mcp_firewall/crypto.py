@@ -34,6 +34,53 @@ KEY_DIR = Path("~/.mcp-firewall/keys").expanduser()
 PUBLIC_KEY_PATH = KEY_DIR / "audit_signing.pub"
 SECRET_KEY_PATH = KEY_DIR / "audit_signing.key"
 
+# OS keychain identifiers. Using keyring lets us delegate secret storage to
+# macOS Keychain, Linux Secret Service / kwallet, or Windows Credential
+# Locker. Set MCP_FIREWALL_KEYRING=0 to disable and use file storage only.
+KEYRING_SERVICE = "mcp-firewall"
+KEYRING_SECRET_KEY = "audit_signing.secret"
+
+
+def _keyring_enabled() -> bool:
+    return os.environ.get("MCP_FIREWALL_KEYRING", "1") != "0"
+
+
+def _try_keyring_get() -> bytes | None:
+    if not _keyring_enabled():
+        return None
+    try:
+        import keyring  # type: ignore[import-not-found]
+
+        b64 = keyring.get_password(KEYRING_SERVICE, KEYRING_SECRET_KEY)
+    except Exception:  # broad: any keyring backend can fail
+        return None
+    if not b64:
+        return None
+    import base64
+
+    try:
+        return base64.b64decode(b64)
+    except Exception:
+        return None
+
+
+def _try_keyring_set(secret_key: bytes) -> bool:
+    if not _keyring_enabled():
+        return False
+    try:
+        import base64
+
+        import keyring  # type: ignore[import-not-found]
+
+        keyring.set_password(
+            KEYRING_SERVICE,
+            KEYRING_SECRET_KEY,
+            base64.b64encode(secret_key).decode("ascii"),
+        )
+        return True
+    except Exception:
+        return False
+
 
 @dataclass
 class KeyPair:
@@ -45,59 +92,77 @@ def ensure_keypair(
     public_path: Path | None = None,
     secret_path: Path | None = None,
 ) -> KeyPair:
-    # Late-bind so monkeypatched module attributes work in tests.
-    public_path = public_path if public_path is not None else PUBLIC_KEY_PATH
-    secret_path = secret_path if secret_path is not None else SECRET_KEY_PATH
     """Load (or atomically generate + persist) the audit signing keypair.
 
     Hardening:
-      - Key directory created with mode 0700 (other users cannot list).
-      - Secret key written with O_CREAT|O_EXCL so two concurrent processes
-        cannot race past the existence check and clobber each other; the
-        second process re-reads the winner's keys.
-      - Secret key written 0600, public key 0644.
+      - Prefers OS keychain (macOS Keychain, Linux Secret Service, Windows
+        Credential Locker) for the secret key. Root can still bypass, but
+        every read leaves an OS-level audit trail.
+      - File-fallback when keyring unavailable (Nitro Enclave, headless
+        server). Set MCP_FIREWALL_KEYRING=0 to force file storage.
+      - Key directory created with mode 0700.
+      - Secret key file written with O_CREAT|O_EXCL — two concurrent
+        processes cannot race past the existence check and clobber each
+        other.
+      - Secret key file 0600, public key 0644.
     """
+    # Late-bind so monkeypatched module attributes work in tests.
+    public_path = public_path if public_path is not None else PUBLIC_KEY_PATH
+    secret_path = secret_path if secret_path is not None else SECRET_KEY_PATH
     public_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(public_path.parent, 0o700)
     except OSError:
         pass
 
-    # Fast path: both files already exist.
-    if public_path.exists() and secret_path.exists():
-        return KeyPair(
-            public_key=public_path.read_bytes(),
-            secret_key=secret_path.read_bytes(),
-        )
+    # Fast path: public key on disk + secret in keyring (preferred).
+    if public_path.exists():
+        keyring_secret = _try_keyring_get()
+        if keyring_secret is not None:
+            return KeyPair(
+                public_key=public_path.read_bytes(),
+                secret_key=keyring_secret,
+            )
+        # Fall through to file fallback below.
+        if secret_path.exists():
+            return KeyPair(
+                public_key=public_path.read_bytes(),
+                secret_key=secret_path.read_bytes(),
+            )
 
     pk, sk = _mldsa.generate_keypair()
 
-    # Atomic O_EXCL write of the secret key. If we lose the race, fall back
-    # to reading whatever the winning process produced.
-    try:
-        fd = os.open(
-            secret_path,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
-        )
-    except FileExistsError:
-        # Another process wrote it first; load theirs.
-        return KeyPair(
-            public_key=public_path.read_bytes(),
-            secret_key=secret_path.read_bytes(),
-        )
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(sk)
-    except Exception:
-        # Best-effort cleanup so we don't leave a half-written secret key.
-        try:
-            os.unlink(secret_path)
-        except OSError:
-            pass
-        raise
+    # Try the keyring FIRST. If it succeeds, we still write the public key
+    # to disk (it's not secret) but skip the secret key file entirely.
+    keyring_ok = _try_keyring_set(sk)
 
-    # Public key — same race-safe path. If it loses, that's fine.
+    # File fallback for the secret key (used when keyring is unavailable
+    # or explicitly disabled — e.g., inside Nitro Enclaves).
+    if not keyring_ok:
+        try:
+            fd = os.open(
+                secret_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        except FileExistsError:
+            # Another process wrote it first; load theirs.
+            return KeyPair(
+                public_key=public_path.read_bytes(),
+                secret_key=secret_path.read_bytes(),
+            )
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(sk)
+        except Exception:
+            try:
+                os.unlink(secret_path)
+            except OSError:
+                pass
+            raise
+        os.chmod(secret_path, 0o600)
+
+    # Public key — write race-safe. (No secret content; chmod 0644.)
     try:
         pfd = os.open(public_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
         try:
@@ -111,9 +176,8 @@ def ensure_keypair(
             raise
     except FileExistsError:
         pass
-
-    os.chmod(secret_path, 0o600)
     os.chmod(public_path, 0o644)
+
     return KeyPair(public_key=pk, secret_key=sk)
 
 

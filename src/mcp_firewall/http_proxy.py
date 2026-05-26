@@ -32,7 +32,7 @@ from .jsonrpc import (
 )
 from . import nitro_enclave
 from .limits import MAX_HTTP_BODY_BYTES
-from .policy import PolicyEngine
+from .policy import PolicyEngine, safe_tool_label
 from .types import Decision, DecisionType, Direction
 
 
@@ -265,10 +265,13 @@ class HttpProxy:
         )
 
     def _log(self, kind: str, seq: int, frame, decision) -> None:
+        tool_label = (
+            safe_tool_label(frame.tool_name) if frame.tool_name else ""
+        )
         sys.stderr.write(
             f"[mcp-firewall {kind} #{seq}] {frame.direction.value} "
             f"{frame.method or '-'} "
-            f"{('tool=' + frame.tool_name) if frame.tool_name else ''} "
+            f"{tool_label} "
             f"-> {decision.type.value}: {decision.reason}\n"
         )
         sys.stderr.flush()
