@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to mcp-firewall.
+All notable changes to mcp-bastion.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **L5 — OS-keychain key custody.** `ensure_keypair()` stores the ML-DSA-44
   secret key in macOS Keychain / Linux Secret Service / Windows Credential
   Locker via the `keyring` library by default. Public key still on disk.
-  Set `MCP_FIREWALL_KEYRING=0` to force file storage (Nitro Enclaves /
+  Set `MCP_BASTION_KEYRING=0` to force file storage (Nitro Enclaves /
   headless servers).
 
 ### Added
@@ -84,7 +84,7 @@ fixed in this release; each carries a regression test in
   hostname must not be on the cloud-metadata / link-local block list.
 - Client-supplied path is sanitized (drop `..`, drop empty segments, reject
   `://`, `//`, `\`) before being appended to the operator-pinned base URL.
-- `MCP_FIREWALL_ALLOW_PRIVATE=1` env var allows private upstreams for dev.
+- `MCP_BASTION_ALLOW_PRIVATE=1` env var allows private upstreams for dev.
 
 ### Added — tamper-evident audit
 - ML-DSA-44 (FIPS 204) signature on every audit row.
@@ -116,7 +116,7 @@ fixed in this release; each carries a regression test in
 ## [0.2.1] — 2026-05-25
 
 ### Added
-- `mcp-firewall wrap <name> -- <upstream>` — generates a paste-ready JSON
+- `mcp-bastion wrap <name> -- <upstream>` — generates a paste-ready JSON
   snippet for Claude Desktop, Cursor, and VS Code MCP configs.
 - `docs/claude-desktop-setup.md` — end-to-end install guide.
 - `tests/test_classifier_real.py` — real-model regression suite (downloads
@@ -137,7 +137,7 @@ fixed in this release; each carries a regression test in
 ### Added
 - **PQC ML-DSA-44 signed audit log.** Every audit row signed via the
   `pqcrypto` library; `verify_chain()` checks both the SHA256 hash chain
-  and each signature. Keypair auto-generated at `~/.mcp-firewall/keys/`.
+  and each signature. Keypair auto-generated at `~/.mcp-bastion/keys/`.
 - **Prompt-injection classifier (optional).** Lazy-loads
   `protectai/deberta-v3-base-prompt-injection-v2` from HuggingFace; scores
   every tool description on `tools/list` responses; `alert` or `block`
@@ -161,6 +161,6 @@ fixed in this release; each carries a regression test in
 - `audit.py` — SQLite hash-chained, tamper-evident log.
 - `stdio_proxy.py` — asyncio bidirectional stdio interception.
 - `http_proxy.py` — aiohttp reverse proxy for Streamable HTTP MCP.
-- `cli.py` — `mcp-firewall up / init / inspect-log`.
+- `cli.py` — `mcp-bastion up / init / inspect-log`.
 - 22 tests; end-to-end smoke against a fake MCP server.
 - Apache 2.0 license.

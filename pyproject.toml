@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mcp-firewall"
+name = "mcp-bastion"
 version = "0.3.1"
 description = "Open-source security gateway for the Model Context Protocol"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
-authors = [{ name = "mcp-firewall contributors" }]
+authors = [{ name = "mcp-bastion contributors" }]
 keywords = ["mcp", "security", "firewall", "gateway", "ai-security", "agent"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -46,12 +46,12 @@ dev = [
 ]
 
 [project.scripts]
-mcp-firewall = "mcp_firewall.cli:main"
+mcp-bastion = "mcp_bastion.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/your-org/mcp-firewall"
-Repository = "https://github.com/your-org/mcp-firewall"
-Issues = "https://github.com/your-org/mcp-firewall/issues"
+Homepage = "https://github.com/your-org/mcp-bastion"
+Repository = "https://github.com/your-org/mcp-bastion"
+Issues = "https://github.com/your-org/mcp-bastion/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

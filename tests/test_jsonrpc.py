@@ -1,7 +1,7 @@
 import json
 
-from mcp_firewall.jsonrpc import parse_frame, serialize_frame, make_error_response
-from mcp_firewall.types import Direction, FrameKind
+from mcp_bastion.jsonrpc import parse_frame, serialize_frame, make_error_response
+from mcp_bastion.types import Direction, FrameKind
 
 
 def _b(payload: dict) -> bytes:

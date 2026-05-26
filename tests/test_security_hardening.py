@@ -9,10 +9,10 @@ import json
 
 import pytest
 
-from mcp_firewall import limits
-from mcp_firewall.jsonrpc import _json_depth, parse_frame
-from mcp_firewall.policy import Policy, PolicyEngine, _redact_in_place
-from mcp_firewall.types import Direction
+from mcp_bastion import limits
+from mcp_bastion.jsonrpc import _json_depth, parse_frame
+from mcp_bastion.policy import Policy, PolicyEngine, _redact_in_place
+from mcp_bastion.types import Direction
 
 
 # C1 — oversized stdio frames are dropped, not parsed.
@@ -75,7 +75,7 @@ def test_regex_pattern_must_be_valid():
 # L1 — long strings are scanned end-to-end (no truncation), but with a
 # wall-clock timeout that aborts catastrophic patterns.
 def test_redact_handles_long_strings_end_to_end():
-    from mcp_firewall import policy as pol
+    from mcp_bastion import policy as pol
 
     rules = pol.Policy.from_dict(
         {"redact_args": [{"pattern": r"sk-[A-Za-z0-9]{20,}", "replacement": "[REDACTED]"}]}
@@ -92,7 +92,7 @@ def test_redact_handles_long_strings_end_to_end():
 
 def test_redact_aborts_catastrophic_pattern():
     """An attacker-supplied pathological pattern times out instead of hanging."""
-    from mcp_firewall import policy as pol
+    from mcp_bastion import policy as pol
 
     # Classic ReDoS: (a+)+b against many a's
     rules = pol.Policy.from_dict(
@@ -138,9 +138,9 @@ def test_redact_handles_deep_tree():
 
 # H1 / SSRF — HttpProxy rejects metadata IP upstreams.
 def test_http_proxy_blocks_metadata_ip():
-    from mcp_firewall.audit import AuditLog
-    from mcp_firewall.http_proxy import HttpProxy
-    from mcp_firewall.policy import PolicyEngine
+    from mcp_bastion.audit import AuditLog
+    from mcp_bastion.http_proxy import HttpProxy
+    from mcp_bastion.policy import PolicyEngine
     from pathlib import Path
     import tempfile
 
@@ -153,8 +153,8 @@ def test_http_proxy_blocks_metadata_ip():
 
 
 def test_http_proxy_rejects_invalid_scheme():
-    from mcp_firewall.audit import AuditLog
-    from mcp_firewall.http_proxy import HttpProxy
+    from mcp_bastion.audit import AuditLog
+    from mcp_bastion.http_proxy import HttpProxy
     from pathlib import Path
     import tempfile
 
@@ -168,8 +168,8 @@ def test_http_proxy_rejects_invalid_scheme():
 
 # H6 — public-key fingerprint pinning.
 def test_audit_log_rejects_swapped_key(tmp_path, monkeypatch):
-    from mcp_firewall import crypto
-    from mcp_firewall.audit import AuditLog
+    from mcp_bastion import crypto
+    from mcp_bastion.audit import AuditLog
 
     # Generate first keypair, write a row.
     monkeypatch.setattr(crypto, "PUBLIC_KEY_PATH", tmp_path / "k1.pub")

@@ -42,8 +42,8 @@ class _LazyClassifier:
                 from transformers import pipeline  # type: ignore[import-not-found]
             except ImportError:
                 sys.stderr.write(
-                    "[mcp-firewall] classifier requested but `transformers` not installed. "
-                    "Install with: pip install 'mcp-firewall[classifier]'\n"
+                    "[mcp-bastion] classifier requested but `transformers` not installed. "
+                    "Install with: pip install 'mcp-bastion[classifier]'\n"
                 )
                 self._import_failed = True
                 return False
@@ -55,7 +55,7 @@ class _LazyClassifier:
                     max_length=512,
                 )
             except Exception as e:  # pragma: no cover
-                sys.stderr.write(f"[mcp-firewall] classifier load failed: {e}\n")
+                sys.stderr.write(f"[mcp-bastion] classifier load failed: {e}\n")
                 self._import_failed = True
                 return False
             return True
@@ -73,7 +73,7 @@ class _LazyClassifier:
         try:
             results = self._pipe(text)
         except Exception as e:  # pragma: no cover
-            sys.stderr.write(f"[mcp-firewall] classifier inference error: {e}\n")
+            sys.stderr.write(f"[mcp-bastion] classifier inference error: {e}\n")
             return None
         if not results:
             return 0.0

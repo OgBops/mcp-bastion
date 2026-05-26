@@ -6,7 +6,7 @@ We cannot run inside an actual enclave from CI, so we verify:
     than throwing
 """
 
-from mcp_firewall import nitro_enclave
+from mcp_bastion import nitro_enclave
 
 
 def test_not_in_enclave_on_dev_host():

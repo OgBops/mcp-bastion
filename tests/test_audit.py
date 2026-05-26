@@ -2,9 +2,9 @@ import json
 import sqlite3
 from pathlib import Path
 
-from mcp_firewall.audit import AuditLog
-from mcp_firewall.jsonrpc import parse_frame
-from mcp_firewall.types import Decision, DecisionType, Direction
+from mcp_bastion.audit import AuditLog
+from mcp_bastion.jsonrpc import parse_frame
+from mcp_bastion.types import Decision, DecisionType, Direction
 
 
 def _frame(payload):

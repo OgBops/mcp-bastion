@@ -57,7 +57,7 @@ class Policy:
     require_approval: list[str] = field(default_factory=list)
     pinning_enabled: bool = False
     pinning_on_drift: str = "alert"  # "alert" or "block"
-    audit_path: Path = field(default_factory=lambda: Path("~/.mcp-firewall/audit.sqlite"))
+    audit_path: Path = field(default_factory=lambda: Path("~/.mcp-bastion/audit.sqlite"))
     classifier_enabled: bool = False
     classifier_threshold: float = 0.85
     classifier_on_match: str = "alert"  # "alert" or "block"
@@ -104,7 +104,7 @@ class Policy:
             pinning_on_drift = "alert"
 
         audit_cfg = data.get("audit") or {}
-        audit_path = Path(audit_cfg.get("path", "~/.mcp-firewall/audit.sqlite")).expanduser()
+        audit_path = Path(audit_cfg.get("path", "~/.mcp-bastion/audit.sqlite")).expanduser()
 
         cls_cfg = data.get("classifier") or {}
         classifier_enabled = bool(cls_cfg.get("enabled", False))

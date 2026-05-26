@@ -33,7 +33,7 @@ out-of-band patches.
    │  └────────────┬───────┘   └─────────────▲────────────────────┘  │
    │               │                          │                       │
    │  ┌────────────▼──────────────────────────┴────────────────────┐  │
-   │  │  mcp-firewall (TRUSTED — this is the data plane)           │  │
+   │  │  mcp-bastion (TRUSTED — this is the data plane)           │  │
    │  │                                                            │  │
    │  │  - Trusts the operator's policy.yaml  (TRUSTED INPUT)      │  │
    │  │  - Distrusts every byte from the LLM client and the MCP    │  │
@@ -88,25 +88,25 @@ Implemented:
 Configuration knobs (env vars; safe defaults):
 
 ```
-MCP_FIREWALL_MAX_FRAME_BYTES=1048576
-MCP_FIREWALL_MAX_HTTP_BODY_BYTES=4194304
-MCP_FIREWALL_MAX_JSON_DEPTH=64
-MCP_FIREWALL_MAX_REGEX_PATTERN_LEN=1024
-MCP_FIREWALL_MAX_REGEX_INPUT_LEN=65536
-MCP_FIREWALL_MAX_REDACT_DEPTH=64
-MCP_FIREWALL_ALLOW_PRIVATE=0       # set to 1 to allow private/loopback upstreams (dev only)
+MCP_BASTION_MAX_FRAME_BYTES=1048576
+MCP_BASTION_MAX_HTTP_BODY_BYTES=4194304
+MCP_BASTION_MAX_JSON_DEPTH=64
+MCP_BASTION_MAX_REGEX_PATTERN_LEN=1024
+MCP_BASTION_MAX_REGEX_INPUT_LEN=65536
+MCP_BASTION_MAX_REDACT_DEPTH=64
+MCP_BASTION_ALLOW_PRIVATE=0       # set to 1 to allow private/loopback upstreams (dev only)
 ```
 
 ## Deployment recommendations
 
 ### Local desktop (Claude Desktop / Cursor / VS Code)
-- Install via venv; let the proxy own `~/.mcp-firewall/`
+- Install via venv; let the proxy own `~/.mcp-bastion/`
 - Don't share the audit DB across users
 - Audit log signature key never leaves the laptop
 
 ### Server / shared host
 - Run as a dedicated unix user (`mcpf`) with no shell
-- Mount `~/.mcp-firewall/` on a separate filesystem with quota
+- Mount `~/.mcp-bastion/` on a separate filesystem with quota
 - Front the HTTP proxy with TLS (Caddy / nginx) and an auth proxy (Cloudflare
   Access, Tailscale, OIDC) — never expose the raw `--listen` to the internet
 - Enable `--verbose` only if you've audited the policy for echo-of-secrets
@@ -157,7 +157,7 @@ The five trade-offs surfaced in the v0.3 audit have been closed:
    audit trail. For environments where root compromise is in scope, use
    the **Nitro Enclave** deployment (`Dockerfile` + `nitro-cli build-enclave`)
    — keys generated inside an enclave never leave it, and a remote party
-   verifies the enclave via `/attestation`. Set `MCP_FIREWALL_KEYRING=0`
+   verifies the enclave via `/attestation`. Set `MCP_BASTION_KEYRING=0`
    to force file storage (e.g., for Nitro Enclaves where no keychain
    exists).
 

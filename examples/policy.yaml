@@ -29,7 +29,7 @@ tool_description_pinning:
   enabled: true
   on_drift: alert  # alert | block
 
-# Optional: prompt-injection classifier. Requires `pip install mcp-firewall[classifier]`.
+# Optional: prompt-injection classifier. Requires `pip install mcp-bastion[classifier]`.
 # Lazy-loads the model on first use (~5s startup, ~50-100ms inference).
 # classifier:
 #   enabled: true
@@ -38,6 +38,6 @@ tool_description_pinning:
 #   model: protectai/deberta-v3-base-prompt-injection-v2
 
 audit:
-  path: ~/.mcp-firewall/audit.sqlite
+  path: ~/.mcp-bastion/audit.sqlite
   # Sidecar anchor file is automatically written next to the SQLite DB
   # (audit.anchor.jsonl). It is append-only and PQC-signed.

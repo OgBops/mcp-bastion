@@ -1,4 +1,4 @@
-"""mcp-firewall CLI."""
+"""mcp-bastion CLI."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from .policy import Policy, PolicyEngine
 from .stdio_proxy import StdioProxy
 
 STARTER_POLICY = """\
-# mcp-firewall starter policy
-# https://github.com/your-org/mcp-firewall
+# mcp-bastion starter policy
+# https://github.com/your-org/mcp-bastion
 
 version: 1
 
@@ -48,12 +48,12 @@ tool_description_pinning:
   on_drift: alert  # alert | block
 
 audit:
-  path: ~/.mcp-firewall/audit.sqlite
+  path: ~/.mcp-bastion/audit.sqlite
 """
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="mcp-firewall")
+@click.version_option(version=__version__, prog_name="mcp-bastion")
 def main() -> None:
     """Security gateway for the Model Context Protocol."""
 
@@ -166,7 +166,7 @@ def up(
     "-p",
     "policy_path",
     type=click.Path(),
-    default="~/.mcp-firewall/policy.yaml",
+    default="~/.mcp-bastion/policy.yaml",
     show_default=True,
     help="Path to policy.yaml that the wrapped server will use.",
 )
@@ -176,11 +176,11 @@ def wrap(
     policy_path: str,
 ) -> None:
     """Print a Claude Desktop / Cursor / VS Code MCP config snippet that wraps
-    an upstream MCP server with mcp-firewall.
+    an upstream MCP server with mcp-bastion.
 
     Example:
 
-        mcp-firewall wrap filesystem -- uvx mcp-server-filesystem /tmp
+        mcp-bastion wrap filesystem -- uvx mcp-server-filesystem /tmp
 
     Then paste the resulting snippet into your client config:
       - Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json
@@ -191,7 +191,7 @@ def wrap(
     snippet = {
         "mcpServers": {
             server_name: {
-                "command": "mcp-firewall",
+                "command": "mcp-bastion",
                 "args": [
                     "up",
                     "--policy",

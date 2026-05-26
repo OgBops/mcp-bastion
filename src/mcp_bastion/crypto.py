@@ -11,7 +11,7 @@ Why ML-DSA instead of Ed25519:
 
 Key storage:
   - Generated on first call to ensure_keypair().
-  - Stored at ~/.mcp-firewall/keys/audit_signing.* with mode 0600.
+  - Stored at ~/.mcp-bastion/keys/audit_signing.* with mode 0600.
   - In v0.2 we keep the key local. v0.3 will support HSM / KMS / TEE-attested
     key custody.
 """
@@ -30,19 +30,19 @@ except ImportError:  # pragma: no cover
 
 
 SIGNING_ALGORITHM = "ML-DSA-44"
-KEY_DIR = Path("~/.mcp-firewall/keys").expanduser()
+KEY_DIR = Path("~/.mcp-bastion/keys").expanduser()
 PUBLIC_KEY_PATH = KEY_DIR / "audit_signing.pub"
 SECRET_KEY_PATH = KEY_DIR / "audit_signing.key"
 
 # OS keychain identifiers. Using keyring lets us delegate secret storage to
 # macOS Keychain, Linux Secret Service / kwallet, or Windows Credential
-# Locker. Set MCP_FIREWALL_KEYRING=0 to disable and use file storage only.
-KEYRING_SERVICE = "mcp-firewall"
+# Locker. Set MCP_BASTION_KEYRING=0 to disable and use file storage only.
+KEYRING_SERVICE = "mcp-bastion"
 KEYRING_SECRET_KEY = "audit_signing.secret"
 
 
 def _keyring_enabled() -> bool:
-    return os.environ.get("MCP_FIREWALL_KEYRING", "1") != "0"
+    return os.environ.get("MCP_BASTION_KEYRING", "1") != "0"
 
 
 def _try_keyring_get() -> bytes | None:
@@ -99,7 +99,7 @@ def ensure_keypair(
         Credential Locker) for the secret key. Root can still bypass, but
         every read leaves an OS-level audit trail.
       - File-fallback when keyring unavailable (Nitro Enclave, headless
-        server). Set MCP_FIREWALL_KEYRING=0 to force file storage.
+        server). Set MCP_BASTION_KEYRING=0 to force file storage.
       - Key directory created with mode 0700.
       - Secret key file written with O_CREAT|O_EXCL — two concurrent
         processes cannot race past the existence check and clobber each

@@ -8,7 +8,7 @@ cryptographically attested report that proves:
   - a fresh nonce supplied by the customer
 
 The customer verifies the attestation against the AWS Nitro root CA and
-matches the PCRs against the published mcp-firewall release artifacts. This
+matches the PCRs against the published mcp-bastion release artifacts. This
 defends against a "compromised proxy" supply-chain attack — the only thing
 the customer has to trust is AWS's root CA and our published PCR values.
 

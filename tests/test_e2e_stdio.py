@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from mcp_firewall.audit import AuditLog
-from mcp_firewall.jsonrpc import parse_frame, serialize_frame
-from mcp_firewall.policy import Policy, PolicyEngine
-from mcp_firewall.types import DecisionType, Direction
+from mcp_bastion.audit import AuditLog
+from mcp_bastion.jsonrpc import parse_frame, serialize_frame
+from mcp_bastion.policy import Policy, PolicyEngine
+from mcp_bastion.types import DecisionType, Direction
 
 
 def test_proxy_pipeline_blocks_denied_tool(tmp_path: Path):

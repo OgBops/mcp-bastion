@@ -1,8 +1,8 @@
 # Control Plane — product spec
 
 This document specifies the **commercial cloud product** that pairs with the
-open-source `mcp-firewall` data-plane proxy. It belongs in a *separate
-repository* (proposed: `mcp-firewall-cloud`), under a non-OSI source-available
+open-source `mcp-bastion` data-plane proxy. It belongs in a *separate
+repository* (proposed: `mcp-bastion-cloud`), under a non-OSI source-available
 license (Elastic v2 or BUSL).
 
 > **Why a second repo:** the OSS data plane is the wedge — bottom-up adoption,
@@ -26,7 +26,7 @@ license (Elastic v2 or BUSL).
 
 | Stage | OSS data plane | Cloud control plane |
 |---|---|---|
-| 0 — try | `pip install mcp-firewall && mcp-firewall up` | — |
+| 0 — try | `pip install mcp-bastion && mcp-bastion up` | — |
 | 1 — adopt | Wrap MCP servers in Claude Desktop / Cursor / VS Code | Free tier: hosted policy management for 1 user |
 | 2 — pilot | Same proxy, runs in staging | Team plan: shared policies, 30-day audit retention, SIEM forward |
 | 3 — produce | Same proxy, runs in prod (optionally inside Nitro Enclave) | Enterprise: SSO/SAML, 7-year audit retention, threat-intel feed, design-partner support |
@@ -56,7 +56,7 @@ license (Elastic v2 or BUSL).
               ┌──────────────────────┴───┐         ┌───┴──────────────────┐
               │  Customer A edge         │         │  Customer B edge     │
               │  ┌───────────────────┐   │         │  ┌────────────────┐  │
-              │  │ mcp-firewall OSS  │   │         │  │ mcp-firewall   │  │
+              │  │ mcp-bastion OSS  │   │         │  │ mcp-bastion   │  │
               │  │ (proxy)           │   │         │  │ OSS (proxy)    │  │
               │  └───────┬───────────┘   │         │  └────────────────┘  │
               │          │ tail audit    │         │                      │
@@ -131,7 +131,7 @@ API: `GET /v1/reputation/server/{server_id}` → score + provenance details.
 ### `attestation-verify-svc`
 For customers running edge proxies inside Nitro Enclaves. Receives the
 attestation document, validates against the AWS Nitro root CA, matches
-PCRs against published `mcp-firewall` release artifacts, returns a signed
+PCRs against published `mcp-bastion` release artifacts, returns a signed
 "verified" certificate the customer can present to auditors.
 
 API: `POST /v1/attestation/verify` body=base64 attestation doc.
@@ -145,12 +145,12 @@ Stripe integration. Per-seat pricing. Three plans:
 | Team | $20/user/mo | Up to 25 users, 30-day audit retention, basic threat-intel feed | |
 | Enterprise | Contact | SSO/SAML, 7y audit + Object Lock, full threat intel, attested execution support | $3k/mo+ floor |
 
-## Edge Forwarder (lives in OSS data-plane repo as `mcp_firewall.cloud`)
+## Edge Forwarder (lives in OSS data-plane repo as `mcp_bastion.cloud`)
 
 A small module the proxy can opt into. Responsibilities:
 
 1. **Pull** signed policy bundles from `policy-svc`. Verify signature against
-   tenant's public key (configured once via `mcp-firewall login`). Hot-swap
+   tenant's public key (configured once via `mcp-bastion login`). Hot-swap
    the in-memory `Policy` object on update.
 2. **Push** audit rows to `audit-ingest-svc` in batches. Compress + sign each
    batch with the tenant's edge key.

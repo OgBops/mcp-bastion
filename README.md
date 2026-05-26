@@ -1,4 +1,4 @@
-# mcp-firewall
+# mcp-bastion
 
 **Open-source security gateway for the Model Context Protocol.**
 
@@ -9,6 +9,10 @@ Logs every tool call to a PQC-signed, tamper-evident audit trail.
 > **Status: v0.3.1 alpha.** 47 tests passing, security-audited, all
 > Critical/High findings patched. API surface stable enough for design
 > partners; backwards-incompatible changes will bump the minor version.
+
+> **Note:** This project is independent and not affiliated with
+> `ressl/mcp-firewall` or any other similarly-named project on PyPI or
+> GitHub.
 
 ## Why
 
@@ -53,12 +57,12 @@ This is the gateway.
 ## Install
 
 ```bash
-# pip install mcp-firewall          # PyPI publish pending; install from source for now
-git clone https://github.com/your-org/mcp-firewall
-cd mcp-firewall
+# pip install mcp-bastion          # PyPI publish pending; install from source for now
+git clone https://github.com/your-org/mcp-bastion
+cd mcp-bastion
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-mcp-firewall --version              # → mcp-firewall, version 0.3.1
+mcp-bastion --version              # → mcp-bastion, version 0.3.1
 ```
 
 Optional extras:
@@ -71,20 +75,20 @@ pip install -e ".[classifier]"    # adds transformers + torch (~2GB) for prompt-
 
 ```bash
 # 1. Generate a starter policy
-mcp-firewall init -o policy.yaml
+mcp-bastion init -o policy.yaml
 
 # 2. Wrap a real MCP server (stdio mode)
-mcp-firewall up \
+mcp-bastion up \
   --policy policy.yaml \
   --upstream "uvx mcp-server-filesystem /tmp" \
   --verbose
 
 # 3. In another shell, drive it with Anthropic's MCP Inspector
 npx @modelcontextprotocol/inspector \
-  mcp-firewall up --policy policy.yaml --upstream "uvx mcp-server-filesystem /tmp"
+  mcp-bastion up --policy policy.yaml --upstream "uvx mcp-server-filesystem /tmp"
 
 # 4. Inspect the PQC-signed audit log
-mcp-firewall inspect-log --policy policy.yaml --verify
+mcp-bastion inspect-log --policy policy.yaml --verify
 ```
 
 To wire it into Claude Desktop, Cursor, or VS Code, see
@@ -92,13 +96,13 @@ To wire it into Claude Desktop, Cursor, or VS Code, see
 quick wrap snippet:
 
 ```bash
-mcp-firewall wrap filesystem -- uvx mcp-server-filesystem /tmp
+mcp-bastion wrap filesystem -- uvx mcp-server-filesystem /tmp
 ```
 
 ## HTTP mode
 
 ```bash
-mcp-firewall up \
+mcp-bastion up \
   --policy policy.yaml \
   --listen 127.0.0.1:8080 \
   --upstream-url https://my-mcp-server.example.com/mcp
@@ -126,13 +130,13 @@ tool_description_pinning:
   on_drift: alert  # alert | block
 
 audit:
-  path: ~/.mcp-firewall/audit.sqlite
+  path: ~/.mcp-bastion/audit.sqlite
 ```
 
 ## Architecture
 
 ```
-LLM client  ─▶  mcp-firewall  ─▶  MCP server
+LLM client  ─▶  mcp-bastion  ─▶  MCP server
               (parse → policy → audit)
 ```
 
@@ -144,7 +148,7 @@ acceptance criteria.
 ### Prompt-injection classifier
 
 ```bash
-pip install 'mcp-firewall[classifier]'  # adds transformers + torch (~2GB)
+pip install 'mcp-bastion[classifier]'  # adds transformers + torch (~2GB)
 ```
 
 Then in policy.yaml:
@@ -164,9 +168,9 @@ injection signal should block.
 ### Nitro Enclave attestation
 
 ```bash
-docker build -t mcp-firewall:0.3.1 .
-nitro-cli build-enclave --docker-uri mcp-firewall:0.3.1 --output-file mcp-firewall.eif
-nitro-cli run-enclave --cpu-count 2 --memory 2048 --eif-path mcp-firewall.eif --enclave-cid 16
+docker build -t mcp-bastion:0.3.1 .
+nitro-cli build-enclave --docker-uri mcp-bastion:0.3.1 --output-file mcp-bastion.eif
+nitro-cli run-enclave --cpu-count 2 --memory 2048 --eif-path mcp-bastion.eif --enclave-cid 16
 ```
 
 Customers verify the running binary with:

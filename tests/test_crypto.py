@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from mcp_firewall import crypto
+from mcp_bastion import crypto
 
 
 def test_ensure_keypair_persists(tmp_path: Path):

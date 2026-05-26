@@ -65,7 +65,7 @@ class HttpProxy:
         if _is_blocked_host(parsed.hostname or ""):
             raise ValueError(
                 f"upstream_url host '{parsed.hostname}' is on the SSRF block list "
-                "(cloud metadata / link-local). Set MCP_FIREWALL_ALLOW_PRIVATE=1 to override."
+                "(cloud metadata / link-local). Set MCP_BASTION_ALLOW_PRIVATE=1 to override."
             )
         self._upstream_scheme = parsed.scheme
         self._upstream_netloc = parsed.netloc
@@ -269,7 +269,7 @@ class HttpProxy:
             safe_tool_label(frame.tool_name) if frame.tool_name else ""
         )
         sys.stderr.write(
-            f"[mcp-firewall {kind} #{seq}] {frame.direction.value} "
+            f"[mcp-bastion {kind} #{seq}] {frame.direction.value} "
             f"{frame.method or '-'} "
             f"{tool_label} "
             f"-> {decision.type.value}: {decision.reason}\n"
@@ -280,12 +280,12 @@ class HttpProxy:
 def _is_blocked_host(host: str) -> bool:
     """SSRF block list: cloud-metadata + link-local + loopback variants.
 
-    Set MCP_FIREWALL_ALLOW_PRIVATE=1 in the environment to bypass (e.g., for
+    Set MCP_BASTION_ALLOW_PRIVATE=1 in the environment to bypass (e.g., for
     local dev where the upstream MCP server runs on 127.0.0.1).
     """
     import os
 
-    if os.environ.get("MCP_FIREWALL_ALLOW_PRIVATE") == "1":
+    if os.environ.get("MCP_BASTION_ALLOW_PRIVATE") == "1":
         return False
     h = host.lower().strip().strip("[]")
     blocked_exact = {
@@ -329,7 +329,7 @@ async def serve_http(
     site = web.TCPSite(runner, listen_host, listen_port)
     await site.start()
     print(
-        f"[mcp-firewall] HTTP proxy listening on {listen_host}:{listen_port} "
+        f"[mcp-bastion] HTTP proxy listening on {listen_host}:{listen_port} "
         f"-> {proxy.upstream_url}",
         file=sys.stderr,
     )

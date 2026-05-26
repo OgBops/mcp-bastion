@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from mcp_firewall.audit import AuditLog
-from mcp_firewall.jsonrpc import parse_frame
-from mcp_firewall.policy import Policy, PolicyEngine, safe_tool_label
-from mcp_firewall.types import Decision, DecisionType, Direction, FrameKind
+from mcp_bastion.audit import AuditLog
+from mcp_bastion.jsonrpc import parse_frame
+from mcp_bastion.policy import Policy, PolicyEngine, safe_tool_label
+from mcp_bastion.types import Decision, DecisionType, Direction, FrameKind
 
 
 # ---- L3: log scrubbing ----
@@ -128,10 +128,10 @@ def test_anchor_detects_hash_substitution(tmp_path: Path):
 # ---- L5: keyring storage ----
 
 def test_keyring_disabled_falls_back_to_file(tmp_path: Path, monkeypatch):
-    """With MCP_FIREWALL_KEYRING=0, keys must land on disk (already covered
+    """With MCP_BASTION_KEYRING=0, keys must land on disk (already covered
     by the conftest fixture but we assert explicitly)."""
-    monkeypatch.setenv("MCP_FIREWALL_KEYRING", "0")
-    from mcp_firewall import crypto
+    monkeypatch.setenv("MCP_BASTION_KEYRING", "0")
+    from mcp_bastion import crypto
 
     monkeypatch.setattr(crypto, "PUBLIC_KEY_PATH", tmp_path / "k.pub")
     monkeypatch.setattr(crypto, "SECRET_KEY_PATH", tmp_path / "k.key")
@@ -144,8 +144,8 @@ def test_keyring_disabled_falls_back_to_file(tmp_path: Path, monkeypatch):
 def test_keyring_enabled_skips_secret_file(tmp_path: Path, monkeypatch):
     """With keyring on (and a stub backend), the secret key file is NOT
     written — the secret lives in the keyring instead."""
-    monkeypatch.setenv("MCP_FIREWALL_KEYRING", "1")
-    from mcp_firewall import crypto
+    monkeypatch.setenv("MCP_BASTION_KEYRING", "1")
+    from mcp_bastion import crypto
 
     # Stub the keyring set/get to use a dict so the test doesn't touch the
     # real macOS Keychain.

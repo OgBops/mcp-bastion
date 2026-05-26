@@ -3,9 +3,9 @@
 import json
 from pathlib import Path
 
-from mcp_firewall.audit import AuditLog
-from mcp_firewall.jsonrpc import parse_frame
-from mcp_firewall.types import Decision, DecisionType, Direction
+from mcp_bastion.audit import AuditLog
+from mcp_bastion.jsonrpc import parse_frame
+from mcp_bastion.types import Decision, DecisionType, Direction
 
 
 def _frame(payload):
@@ -13,8 +13,8 @@ def _frame(payload):
 
 
 def test_signed_log_verifies(tmp_path: Path, monkeypatch):
-    # Force keypair into tmp so we don't pollute ~/.mcp-firewall/keys
-    from mcp_firewall import crypto
+    # Force keypair into tmp so we don't pollute ~/.mcp-bastion/keys
+    from mcp_bastion import crypto
 
     monkeypatch.setattr(crypto, "PUBLIC_KEY_PATH", tmp_path / "k.pub")
     monkeypatch.setattr(crypto, "SECRET_KEY_PATH", tmp_path / "k.key")
@@ -32,7 +32,7 @@ def test_signed_log_verifies(tmp_path: Path, monkeypatch):
 
 
 def test_unsigned_mode_still_works(tmp_path: Path, monkeypatch):
-    from mcp_firewall import crypto
+    from mcp_bastion import crypto
 
     monkeypatch.setattr(crypto, "PUBLIC_KEY_PATH", tmp_path / "k.pub")
     monkeypatch.setattr(crypto, "SECRET_KEY_PATH", tmp_path / "k.key")

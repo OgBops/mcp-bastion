@@ -1,4 +1,4 @@
-# mcp-firewall — Build Plan
+# mcp-bastion — Build Plan
 
 **Status (as of v0.3.1):** v0 acceptance criteria are met *and exceeded* —
 PQC signatures, prompt-injection classifier, Nitro attestation, OS keychain
@@ -14,7 +14,7 @@ threat-intel data flywheel that becomes the moat.
 
 ## Why this repo exists
 
-Per `mcp-firewall-memo.md` (in the parent Asterism repo): the MCP spec authors
+Per `mcp-bastion-memo.md` (in the parent Asterism repo): the MCP spec authors
 themselves named "gateway and proxy patterns" as an open enterprise problem on
 the 2026 roadmap. The official MCP Registry delegates security scanning to
 upstream package registries. No dominant MCP-native security middleware exists
@@ -36,7 +36,7 @@ This repo is the data plane.
 │  Claude Code)    │      │         │       │  custom...)      │
 └──────────────────┘      ▼         ▼       └──────────────────┘
                     ┌──────────────────────┐
-                    │  mcp-firewall proxy  │
+                    │  mcp-bastion proxy  │
                     │                      │
                     │  ┌────────────────┐  │
                     │  │ JSON-RPC parse │  │
@@ -104,19 +104,19 @@ tool_description_pinning:
 
 # Audit log location
 audit:
-  path: ~/.mcp-firewall/audit.sqlite
+  path: ~/.mcp-bastion/audit.sqlite
 ```
 
 ## Acceptance criteria (v0 status)
 
 - [x] Repo init with Apache 2.0 license, README, pyproject
 - [x] `pip install -e .` works on clean Python 3.11+ env (verified on 3.14)
-- [x] `mcp-firewall init` creates a starter `policy.yaml`
-- [x] `mcp-firewall up --upstream "uvx mcp-server-filesystem ~/tmp"` proxies a
+- [x] `mcp-bastion init` creates a starter `policy.yaml`
+- [x] `mcp-bastion up --upstream "uvx mcp-server-filesystem ~/tmp"` proxies a
       real stdio MCP server end-to-end *(stdio data-path verified against a
       fixture server; `uvx mcp-server-filesystem` not yet exercised live —
       same code path)*
-- [x] `mcp-firewall up --listen 127.0.0.1:8080 --upstream-url ...` HTTP proxy
+- [x] `mcp-bastion up --listen 127.0.0.1:8080 --upstream-url ...` HTTP proxy
       code complete; SSRF block list and request-body cap in place *(not yet
       exercised against a hosted MCP server)*
 - [x] Every `tools/call` is logged to SQLite with hash-chained integrity
@@ -173,7 +173,7 @@ audit:
 ## Repo layout (v0.3.1)
 
 ```
-mcp-firewall/
+mcp-bastion/
 ├── BUILD_PLAN.md              # this file
 ├── README.md
 ├── SECURITY.md                # threat model + disclosure
@@ -186,7 +186,7 @@ mcp-firewall/
 │   └── claude-desktop-setup.md
 ├── examples/
 │   └── policy.yaml
-├── src/mcp_firewall/
+├── src/mcp_bastion/
 │   ├── __init__.py
 │   ├── types.py
 │   ├── limits.py              # hard caps, env-overridable

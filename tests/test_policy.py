@@ -1,9 +1,9 @@
 import json
 import sqlite3
 
-from mcp_firewall.jsonrpc import parse_frame
-from mcp_firewall.policy import Policy, PolicyEngine
-from mcp_firewall.types import DecisionType, Direction
+from mcp_bastion.jsonrpc import parse_frame
+from mcp_bastion.policy import Policy, PolicyEngine
+from mcp_bastion.types import DecisionType, Direction
 
 
 def _frame(payload: dict, direction=Direction.CLIENT_TO_SERVER):

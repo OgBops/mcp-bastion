@@ -44,7 +44,7 @@ ADVERSARIAL = [
 
 @pytest.mark.slow
 def test_real_classifier_detects_obvious_attacks():
-    from mcp_firewall.classifier import get_classifier
+    from mcp_bastion.classifier import get_classifier
 
     clf = get_classifier()
     assert clf._ensure_loaded(), "model failed to load"
